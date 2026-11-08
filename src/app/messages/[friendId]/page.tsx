@@ -8,19 +8,19 @@ import { Avatar } from '@/components/layout/AppLayout';
 import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText } from 'lucide-react';
 import Link from 'next/link';
 
-const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉'];
+const EMOJI_LIST = ['❤️', '😊', '😂', '🥺', '✨', '💕', '😭', '🔥', '👍', '🎉'];
 
 export default function DMPage() {
   const router = useRouter();
   const params = useParams();
   const friendId = params.friendId as string;
-  const [profile, setProfile] = useState<Profile|null>(null);
-  const [friend, setFriend] = useState<Profile|null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [friend, setFriend] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [reactionMsg, setReactionMsg] = useState<string|null>(null);
+  const [reactionMsg, setReactionMsg] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordTime, setRecordTime] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -38,7 +38,7 @@ export default function DMPage() {
       const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       if (!prof) { router.replace('/login'); return; }
       setProfile(prof);
-      document.documentElement.setAttribute('data-theme', prof.theme||'blue');
+      document.documentElement.setAttribute('data-theme', prof.theme || 'blue');
 
       const { data: fr } = await supabase.from('profiles').select('*').eq('id', friendId).single();
       setFriend(fr);
@@ -50,16 +50,16 @@ export default function DMPage() {
         .eq('is_deleted', false)
         .order('created_at', { ascending: true })
         .limit(100);
-      setMessages(msgs||[]);
+      setMessages(msgs || []);
       setLoading(false);
 
       // Realtime subscription
       const channel = supabase.channel(`dm-${[user.id, friendId].sort().join('-')}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
           const msg = payload.new as Message;
-          if ((msg.sender_id===user.id&&msg.receiver_id===friendId)||(msg.sender_id===friendId&&msg.receiver_id===user.id)) {
+          if ((msg.sender_id === user.id && msg.receiver_id === friendId) || (msg.sender_id === friendId && msg.receiver_id === user.id)) {
             const { data: full } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').eq('id', msg.id).single();
-            if (full) setMessages(m=>[...m, full]);
+            if (full) setMessages(m => [...m, full]);
           }
         })
         .subscribe();
@@ -175,28 +175,28 @@ export default function DMPage() {
       .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
       .or(`and(sender_id.eq.${profile!.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile!.id})`)
       .order('created_at', { ascending: true }).limit(100);
-    setMessages(msgs||[]);
+    setMessages(msgs || []);
   }
 
   async function deleteMessage(msgId: string) {
     const supabase = createClient();
     await supabase.from('messages').update({ is_deleted: true, content: null }).eq('id', msgId).eq('sender_id', profile!.id);
-    setMessages(m=>m.map(msg=>msg.id===msgId?{...msg,is_deleted:true,content:null}:msg));
+    setMessages(m => m.map(msg => msg.id === msgId ? { ...msg, is_deleted: true, content: null } : msg));
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0,1,2].map(i=><div key={i} style={{width:10,height:10,borderRadius:'50%',background:'var(--color-accent)',animation:'float 1s ease-in-out infinite',animationDelay:`${i*0.2}s`}}/>)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0, 1, 2].map(i => <div key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--color-accent)', animation: 'float 1s ease-in-out infinite', animationDelay: `${i * 0.2}s` }} />)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
 
   return (
     <div className="flex flex-col h-screen theme-bg">
       {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)'}}>
-        <Link href="/messages" className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><ArrowLeft size={18} style={{color:'var(--color-accent)'}}/></Link>
+      <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)' }}>
+        <Link href="/messages" className="p-2 rounded-xl" style={{ background: 'var(--color-secondary)' }}><ArrowLeft size={18} style={{ color: 'var(--color-accent)' }} /></Link>
         {friend && (
           <>
-            <div className="relative"><Avatar profile={friend} size={38}/><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{background:friend.is_online?'#4ADE80':'#9CA3AF'}}/></div>
+            <div className="relative"><Avatar profile={friend} size={38} /><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{ background: friend.is_online ? '#4ADE80' : '#9CA3AF' }} /></div>
             <div>
-              <p className="font-black text-sm theme-text">{friend.display_name||friend.username}</p>
-              <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{friend.is_online?'🟢 Online':'⚫ Offline'}</p>
+              <p className="font-black text-sm theme-text">{friend.display_name || friend.username}</p>
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{friend.is_online ? '🟢 Online' : '⚫ Offline'}</p>
             </div>
           </>
         )}
@@ -204,25 +204,25 @@ export default function DMPage() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.map(msg=>{
+        {messages.map(msg => {
           const mine = msg.sender_id === profile?.id;
           if (msg.is_deleted) return (
-            <div key={msg.id} className={`flex ${mine?'justify-end':'justify-start'}`}>
-              <span className="text-xs italic px-3 py-1.5 rounded-2xl" style={{color:'var(--color-text-muted)',background:'var(--color-secondary)'}}>Message deleted</span>
+            <div key={msg.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+              <span className="text-xs italic px-3 py-1.5 rounded-2xl" style={{ color: 'var(--color-text-muted)', background: 'var(--color-secondary)' }}>Message deleted</span>
             </div>
           );
           return (
-            <div key={msg.id} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`}>
-              {!mine && <Avatar profile={(msg.sender as Profile)||{}} size={28}/>}
-              <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-1`}>
+            <div key={msg.id} className={`flex gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
+              {!mine && <Avatar profile={(msg.sender as Profile) || {}} size={28} />}
+              <div className={`max-w-[75%] ${mine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                 <div
                   className="px-4 py-2.5 rounded-2xl text-sm relative group cursor-pointer"
                   style={{
-                    background: mine?'var(--color-bubble-mine)':'var(--color-bubble-other)',
-                    border: mine?undefined:'1px solid var(--color-border)',
-                    borderRadius: mine?'20px 20px 4px 20px':'20px 20px 20px 4px',
+                    background: mine ? 'var(--color-bubble-mine)' : 'var(--color-bubble-other)',
+                    border: mine ? undefined : '1px solid var(--color-border)',
+                    borderRadius: mine ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
                   }}
-                  onContextMenu={e=>{e.preventDefault();setReactionMsg(msg.id);}}
+                  onContextMenu={e => { e.preventDefault(); setReactionMsg(msg.id); }}
                 >
                   {/* Media Content */}
                   {msg.type === 'image' && msg.media_url && (
@@ -247,32 +247,32 @@ export default function DMPage() {
                   )}
                   {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.content}
                   {/* Reaction picker on hover */}
-                  {reactionMsg===msg.id && (
-                    <div className="absolute bottom-full mb-1 left-0 flex gap-1 p-2 rounded-2xl z-10" style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
-                      {EMOJI_LIST.map(e=><button key={e} onClick={()=>addReaction(msg.id,e)} className="text-lg hover:scale-125 transition-transform">{e}</button>)}
-                      <button onClick={()=>setReactionMsg(null)} className="text-xs p-1"><X size={12}/></button>
+                  {reactionMsg === msg.id && (
+                    <div className="absolute bottom-full mb-1 left-0 flex gap-1 p-2 rounded-2xl z-10" style={{ background: 'var(--color-surface)', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', border: '1px solid var(--color-border)' }}>
+                      {EMOJI_LIST.map(e => <button key={e} onClick={() => addReaction(msg.id, e)} className="text-lg hover:scale-125 transition-transform">{e}</button>)}
+                      <button onClick={() => setReactionMsg(null)} className="text-xs p-1"><X size={12} /></button>
                     </div>
                   )}
                 </div>
                 {/* Reactions display */}
-                {msg.reactions && msg.reactions.length>0 && (
+                {msg.reactions && msg.reactions.length > 0 && (
                   <div className="flex gap-1 flex-wrap">
-                    {Object.entries(msg.reactions.reduce((acc:Record<string,number>,r:any)=>({...acc,[r.emoji]:(acc[r.emoji]||0)+1}),{})).map(([emoji,count])=>(
-                      <button key={emoji} onClick={()=>addReaction(msg.id,emoji)} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs" style={{background:'var(--color-secondary)',border:'1px solid var(--color-border)'}}>
-                        {emoji} <span style={{color:'var(--color-text-muted)'}}>{count as number}</span>
+                    {Object.entries(msg.reactions.reduce((acc: Record<string, number>, r: any) => ({ ...acc, [r.emoji]: (acc[r.emoji] || 0) + 1 }), {})).map(([emoji, count]) => (
+                      <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs" style={{ background: 'var(--color-secondary)', border: '1px solid var(--color-border)' }}>
+                        {emoji} <span style={{ color: 'var(--color-text-muted)' }}>{count as number}</span>
                       </button>
                     ))}
                   </div>
                 )}
-                <span className="text-xs" style={{color:'var(--color-text-muted)'}}>
-                  {new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
-                  {mine && <button onClick={()=>deleteMessage(msg.id)} className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{color:'#FF6B6B'}}>Delete</button>}
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {mine && <button onClick={() => deleteMessage(msg.id)} className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{ color: '#FF6B6B' }}>Delete</button>}
                 </span>
               </div>
             </div>
           );
         })}
-        <div ref={bottomRef}/>
+        <div ref={bottomRef} />
       </div>
 
       {/* Hidden file input */}
@@ -286,28 +286,28 @@ export default function DMPage() {
 
       {/* Input / Voice Bar */}
       {isRecording ? (
-        <div className="flex items-center justify-between p-4 safe-bottom flex-shrink-0 animate-pulse" style={{background:'var(--color-surface)',borderTop:'1px solid var(--color-border)'}}>
+        <div className="flex items-center justify-between p-4 safe-bottom flex-shrink-0 animate-pulse" style={{ background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)' }}>
           <div className="flex items-center gap-3">
             <span className="w-3 h-3 rounded-full bg-red-500 animate-ping" />
             <span className="text-sm font-bold theme-text">Recording voice note... {recordTime}s</span>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={()=>stopRecording(false)} className="p-2.5 rounded-full" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+            <button type="button" onClick={() => stopRecording(false)} className="p-2.5 rounded-full" style={{ background: 'rgba(255,107,107,0.1)', color: '#FF6B6B' }}>
               <X size={18} />
             </button>
-            <button type="button" onClick={()=>stopRecording(true)} className="theme-btn p-2.5 rounded-full">
+            <button type="button" onClick={() => stopRecording(true)} className="theme-btn p-2.5 rounded-full">
               <Send size={18} />
             </button>
           </div>
         </div>
       ) : (
-        <form onSubmit={sendMessage} className="flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'var(--color-surface)',borderTop:'1px solid var(--color-border)'}}>
+        <form onSubmit={sendMessage} className="flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{ background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)' }}>
           <button
             type="button"
             disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
             className="p-3 rounded-full transition-all hover:scale-105"
-            style={{background:'var(--color-secondary)',color:'var(--color-accent)'}}
+            style={{ background: 'var(--color-secondary)', color: 'var(--color-accent)' }}
             title="Attach file"
           >
             <Paperclip size={18} />
@@ -318,7 +318,7 @@ export default function DMPage() {
             disabled={uploading}
             onClick={startRecording}
             className="p-3 rounded-full transition-all hover:scale-105"
-            style={{background:'var(--color-secondary)',color:'var(--color-accent)'}}
+            style={{ background: 'var(--color-secondary)', color: 'var(--color-accent)' }}
             title="Record voice message"
           >
             <Mic size={18} />
@@ -326,18 +326,18 @@ export default function DMPage() {
 
           <div className="flex-1 relative">
             <textarea
-              value={input} onChange={e=>{setInput(e.target.value);e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px';}}
-              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
+              value={input} onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(e as any); } }}
               placeholder={uploading ? "Uploading media..." : "Say something nice... ♡"}
               disabled={uploading}
               rows={1}
               className="theme-input w-full py-3 px-4 text-sm resize-none"
-              style={{minHeight:44,maxHeight:120}}
+              style={{ minHeight: 44, maxHeight: 120 }}
             />
           </div>
 
-          <button type="submit" disabled={!input.trim()||sending||uploading} className="theme-btn p-3 flex-shrink-0" style={{borderRadius:'50%'}}>
-            <Send size={16}/>
+          <button type="submit" disabled={!input.trim() || sending || uploading} className="theme-btn p-3 flex-shrink-0" style={{ borderRadius: '50%' }}>
+            <Send size={16} />
           </button>
         </form>
       )}
