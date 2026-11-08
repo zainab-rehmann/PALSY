@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText } from 'lucide-react';
 import Link from 'next/link';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉'];
@@ -21,6 +21,13 @@ export default function DMPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [reactionMsg, setReactionMsg] = useState<string|null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordTime, setRecordTime] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordIntervalRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,6 +68,90 @@ export default function DMPage() {
   }, [router, friendId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !profile) return;
+    setUploading(true);
+    const supabase = createClient();
+    const ext = file.name.split('.').pop();
+    const fileName = `${profile.id}/${Date.now()}.${ext}`;
+
+    const { data, error } = await supabase.storage.from('media').upload(fileName, file);
+    if (!error && data) {
+      const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
+      let type: 'text' | 'image' | 'video' | 'audio' | 'file' = 'file';
+      if (file.type.startsWith('image/')) type = 'image';
+      else if (file.type.startsWith('video/')) type = 'video';
+      else if (file.type.startsWith('audio/')) type = 'audio';
+
+      await supabase.from('messages').insert({
+        sender_id: profile.id,
+        receiver_id: friendId,
+        content: file.name,
+        media_url: publicUrl,
+        type,
+      });
+    }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (audioBlob.size < 1000) return; // Too short
+        setUploading(true);
+        const supabase = createClient();
+        const fileName = `${profile?.id}/voice_${Date.now()}.webm`;
+        const { data, error } = await supabase.storage.from('media').upload(fileName, audioBlob, { contentType: 'audio/webm' });
+        if (!error && data && profile) {
+          const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
+          await supabase.from('messages').insert({
+            sender_id: profile.id,
+            receiver_id: friendId,
+            content: 'Voice message',
+            media_url: publicUrl,
+            type: 'audio',
+          });
+        }
+        setUploading(false);
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setRecordTime(0);
+      recordIntervalRef.current = setInterval(() => {
+        setRecordTime(t => t + 1);
+      }, 1000);
+    } catch (err) {
+      alert('Microphone access denied or not available.');
+    }
+  }
+
+  function stopRecording(send: boolean = true) {
+    if (!mediaRecorderRef.current) return;
+    clearInterval(recordIntervalRef.current);
+    if (!send) {
+      audioChunksRef.current = [];
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    } else {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    setRecordTime(0);
+  }
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -133,7 +224,28 @@ export default function DMPage() {
                   }}
                   onContextMenu={e=>{e.preventDefault();setReactionMsg(msg.id);}}
                 >
-                  {msg.content}
+                  {/* Media Content */}
+                  {msg.type === 'image' && msg.media_url && (
+                    <div className="mb-2 rounded-xl overflow-hidden max-w-xs">
+                      <img src={msg.media_url} alt="shared image" className="w-full object-cover rounded-xl hover:scale-105 transition-transform" />
+                    </div>
+                  )}
+                  {msg.type === 'video' && msg.media_url && (
+                    <div className="mb-2 rounded-xl overflow-hidden max-w-xs">
+                      <video src={msg.media_url} controls className="w-full rounded-xl" />
+                    </div>
+                  )}
+                  {msg.type === 'audio' && msg.media_url && (
+                    <div className="py-1">
+                      <audio src={msg.media_url} controls className="h-8 max-w-[220px]" />
+                    </div>
+                  )}
+                  {msg.type === 'file' && msg.media_url && (
+                    <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline text-xs py-1">
+                      <FileText size={16} /> {msg.content || 'Download Attachment'}
+                    </a>
+                  )}
+                  {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.content}
                   {/* Reaction picker on hover */}
                   {reactionMsg===msg.id && (
                     <div className="absolute bottom-full mb-1 left-0 flex gap-1 p-2 rounded-2xl z-10" style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
@@ -163,22 +275,72 @@ export default function DMPage() {
         <div ref={bottomRef}/>
       </div>
 
-      {/* Input */}
-      <form onSubmit={sendMessage} className="flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'var(--color-surface)',borderTop:'1px solid var(--color-border)'}}>
-        <div className="flex-1 relative">
-          <textarea
-            value={input} onChange={e=>{setInput(e.target.value);e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px';}}
-            onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
-            placeholder="Say something nice... ♡" rows={1}
-            className="theme-input w-full py-3 px-4 pr-10 text-sm resize-none"
-            style={{minHeight:44,maxHeight:120}}
-          />
-          <button type="button" onClick={()=>setReactionMsg('picker')} className="absolute right-3 bottom-3" style={{color:'var(--color-text-muted)'}}><Smile size={16}/></button>
+      {/* Hidden file input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        className="hidden"
+        accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
+      />
+
+      {/* Input / Voice Bar */}
+      {isRecording ? (
+        <div className="flex items-center justify-between p-4 safe-bottom flex-shrink-0 animate-pulse" style={{background:'var(--color-surface)',borderTop:'1px solid var(--color-border)'}}>
+          <div className="flex items-center gap-3">
+            <span className="w-3 h-3 rounded-full bg-red-500 animate-ping" />
+            <span className="text-sm font-bold theme-text">Recording voice note... {recordTime}s</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={()=>stopRecording(false)} className="p-2.5 rounded-full" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+              <X size={18} />
+            </button>
+            <button type="button" onClick={()=>stopRecording(true)} className="theme-btn p-2.5 rounded-full">
+              <Send size={18} />
+            </button>
+          </div>
         </div>
-        <button type="submit" disabled={!input.trim()||sending} className="theme-btn p-3 flex-shrink-0" style={{borderRadius:'50%'}}>
-          <Send size={16}/>
-        </button>
-      </form>
+      ) : (
+        <form onSubmit={sendMessage} className="flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'var(--color-surface)',borderTop:'1px solid var(--color-border)'}}>
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="p-3 rounded-full transition-all hover:scale-105"
+            style={{background:'var(--color-secondary)',color:'var(--color-accent)'}}
+            title="Attach file"
+          >
+            <Paperclip size={18} />
+          </button>
+
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={startRecording}
+            className="p-3 rounded-full transition-all hover:scale-105"
+            style={{background:'var(--color-secondary)',color:'var(--color-accent)'}}
+            title="Record voice message"
+          >
+            <Mic size={18} />
+          </button>
+
+          <div className="flex-1 relative">
+            <textarea
+              value={input} onChange={e=>{setInput(e.target.value);e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px';}}
+              onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
+              placeholder={uploading ? "Uploading media..." : "Say something nice... ♡"}
+              disabled={uploading}
+              rows={1}
+              className="theme-input w-full py-3 px-4 text-sm resize-none"
+              style={{minHeight:44,maxHeight:120}}
+            />
+          </div>
+
+          <button type="submit" disabled={!input.trim()||sending||uploading} className="theme-btn p-3 flex-shrink-0" style={{borderRadius:'50%'}}>
+            <Send size={16}/>
+          </button>
+        </form>
+      )}
       <style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style>
     </div>
   );
