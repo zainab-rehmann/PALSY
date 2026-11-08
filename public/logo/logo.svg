@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" width="400" height="120">
+  <defs>
+    <radialGradient id="blueGradH" cx="38%" cy="35%" r="62%">
+      <stop offset="0%" stop-color="#E8F4FF"/>
+      <stop offset="60%" stop-color="#C5DEFF"/>
+      <stop offset="100%" stop-color="#A9C9F5"/>
+    </radialGradient>
+    <radialGradient id="pinkGradH" cx="38%" cy="35%" r="62%">
+      <stop offset="0%" stop-color="#FDE8F0"/>
+      <stop offset="60%" stop-color="#F7C8DC"/>
+      <stop offset="100%" stop-color="#F2BBD2"/>
+    </radialGradient>
+  </defs>
+
+  <!-- === ICON SECTION (left) === -->
+  <g transform="translate(0, 5) scale(0.52)">
+    <!-- Pink bubble outline -->
+    <ellipse cx="128" cy="112" rx="58" ry="54"
+      fill="#1a0a10" transform="rotate(-10 128 112)"/>
+    <!-- Pink bubble fill -->
+    <ellipse cx="128" cy="110" rx="52" ry="48"
+      fill="url(#pinkGradH)" transform="rotate(-10 128 110)"/>
+    <!-- Pink tail outline -->
+    <path d="M100 148 Q88 168 76 172 Q90 162 96 148 Z" fill="#1a0a10"/>
+    <path d="M102 148 Q92 164 82 167 Q94 159 99 148 Z" fill="url(#pinkGradH)"/>
+
+    <!-- Blue bubble outline -->
+    <circle cx="85" cy="102" r="62" fill="#1a0a10"/>
+    <!-- Blue bubble fill -->
+    <circle cx="85" cy="100" r="56" fill="url(#blueGradH)"/>
+    <!-- Blue tail outline -->
+    <path d="M58 148 Q42 172 30 178 Q46 164 54 148 Z" fill="#1a0a10"/>
+    <path d="M60 148 Q46 168 36 172 Q50 160 57 148 Z" fill="url(#blueGradH)"/>
+
+    <!-- Smiley eyes -->
+    <ellipse cx="73" cy="93" rx="7" ry="8" fill="#1a1a2e"/>
+    <ellipse cx="73" cy="91.5" rx="2.5" ry="2.5" fill="#fff" opacity="0.4"/>
+    <ellipse cx="96" cy="90" rx="7" ry="8" fill="#1a1a2e"/>
+    <ellipse cx="96" cy="88.5" rx="2.5" ry="2.5" fill="#fff" opacity="0.4"/>
+    <!-- Smile -->
+    <path d="M68 108 Q84 122 101 108" stroke="#1a1a2e" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+    <!-- Yellow heart outline -->
+    <path d="M94 46 C94 36 82 30 76 38 C70 30 58 36 58 46 C58 56 76 70 76 70 C76 70 94 56 94 46 Z"
+      fill="#2a1a00" transform="translate(14, -6) scale(0.95)"/>
+    <!-- Yellow heart fill -->
+    <path d="M94 46 C94 36 82 30 76 38 C70 30 58 36 58 46 C58 56 76 70 76 70 C76 70 94 56 94 46 Z"
+      fill="#FFD97D" transform="translate(15, -5) scale(0.88)"/>
+    <ellipse cx="84" cy="41" rx="4" ry="2.5" fill="#fff" opacity="0.4" transform="rotate(-20 84 41)"/>
+  </g>
+
+  <!-- === WORDMARK "palsy" === -->
+  <text
+    x="118"
+    y="78"
+    font-family="'Nunito', 'Quicksand', 'Poppins', 'Arial Rounded MT Bold', 'Arial', sans-serif"
+    font-size="58"
+    font-weight="800"
+    letter-spacing="-1"
+    fill="#34445C">palsy</text>
+
+  <!-- Tagline -->
+  <text
+    x="120"
+    y="100"
+    font-family="'Nunito', 'Quicksand', 'Poppins', 'Arial', sans-serif"
+    font-size="13"
+    font-weight="500"
+    letter-spacing="1.5"
+    fill="#7CA8E8">your little corner of friendship. ♡</text>
+</svg>

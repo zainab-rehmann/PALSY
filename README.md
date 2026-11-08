@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PALSY ♡ — Your Little Corner of Friendship
 
-## Getting Started
+> A cute, cozy and private digital hangout for friends.
 
-First, run the development server:
+## ✨ Features
 
+- 🎨 Blue & Pink themes (user-selectable, persisted)
+- 🔐 Supabase Auth (email/password)
+- 👥 Friends system (search, add, remove)
+- 🏠 Rooms (create, join by invite code, customize with presets)
+- 💬 Real-time messaging (private DMs + room chat)
+- 😊 Emoji reactions on messages
+- 🎮 4 multiplayer games: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman
+- 📱 Fully responsive (mobile + desktop)
+- 🔔 Notifications
+- 🌐 Ready for Vercel deployment
+
+---
+
+## 🚀 Getting Started
+
+### 1. Clone the repository
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/yourusername/palsy.git
+cd palsy
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Set up Supabase
+1. Create a project at [supabase.com](https://supabase.com)
+2. Go to your project → SQL Editor
+3. Run the migration: `supabase/migrations/001_initial.sql`
+4. Set up Storage bucket named `avatars` (public)
+5. Set up Storage bucket named `media` (authenticated)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Configure environment variables
+```bash
+cp .env.example .env.local
+```
+Edit `.env.local`:
+```
+NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 4. Run locally
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000)
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## 🌐 Deploy to Vercel
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Push to GitHub
+2. Import repo in [vercel.com](https://vercel.com)
+3. Add environment variables in Vercel dashboard
+4. Deploy!
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 🗄️ Database
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Run `supabase/migrations/001_initial.sql` in your Supabase SQL Editor.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Tables: `profiles`, `friend_requests`, `friendships`, `rooms`, `room_members`, `messages`, `message_reactions`, `notifications`, `games`, `game_players`
+
+All tables have Row Level Security (RLS) enabled.
+
+---
+
+## 🎨 Tech Stack
+
+- **Frontend**: Next.js 15, React, TypeScript, Tailwind CSS
+- **Backend**: Supabase (Auth, Database, Realtime, Storage)
+- **Icons**: Lucide React
+- **Fonts**: Nunito (Google Fonts)
+- **Deployment**: Vercel
+
+---
+
+Made with ♡ — A tiny happy place on the internet, made just for our friends.

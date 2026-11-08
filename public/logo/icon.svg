@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <!-- Blue bubble gradient -->
+    <radialGradient id="blueGrad" cx="38%" cy="35%" r="62%">
+      <stop offset="0%" stop-color="#E8F4FF"/>
+      <stop offset="60%" stop-color="#C5DEFF"/>
+      <stop offset="100%" stop-color="#A9C9F5"/>
+    </radialGradient>
+    <!-- Pink bubble gradient -->
+    <radialGradient id="pinkGrad" cx="38%" cy="35%" r="62%">
+      <stop offset="0%" stop-color="#FDE8F0"/>
+      <stop offset="60%" stop-color="#F7C8DC"/>
+      <stop offset="100%" stop-color="#F2BBD2"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Pink bubble (back/right) — outline first -->
+  <ellipse cx="128" cy="112" rx="58" ry="54"
+    fill="#1a0a10" transform="rotate(-10 128 112)"/>
+  <!-- Pink bubble fill -->
+  <ellipse cx="128" cy="110" rx="52" ry="48"
+    fill="url(#pinkGrad)" transform="rotate(-10 128 110)"/>
+  <!-- Pink bubble tail -->
+  <path d="M100 148 Q88 168 76 172 Q90 162 96 148 Z" fill="#1a0a10"/>
+  <path d="M102 148 Q92 164 82 167 Q94 159 99 148 Z" fill="url(#pinkGrad)"/>
+
+  <!-- Blue bubble (front/left) — outline -->
+  <circle cx="85" cy="102" r="62" fill="#1a0a10"/>
+  <!-- Blue bubble fill -->
+  <circle cx="85" cy="100" r="56" fill="url(#blueGrad)"/>
+  <!-- Blue bubble tail (bottom-left) -->
+  <path d="M58 148 Q42 172 30 178 Q46 164 54 148 Z" fill="#1a0a10"/>
+  <path d="M60 148 Q46 168 36 172 Q50 160 57 148 Z" fill="url(#blueGrad)"/>
+
+  <!-- Smiley face on blue bubble -->
+  <!-- Left eye -->
+  <ellipse cx="73" cy="93" rx="7" ry="8" fill="#1a1a2e"/>
+  <ellipse cx="73" cy="91.5" rx="2.5" ry="2.5" fill="#fff" opacity="0.4"/>
+  <!-- Right eye -->
+  <ellipse cx="96" cy="90" rx="7" ry="8" fill="#1a1a2e"/>
+  <ellipse cx="96" cy="88.5" rx="2.5" ry="2.5" fill="#fff" opacity="0.4"/>
+  <!-- Smile -->
+  <path d="M68 108 Q84 122 101 108" stroke="#1a1a2e" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+  <!-- Yellow heart (top center, with black outline) -->
+  <!-- Heart outline -->
+  <path d="M94 46 C94 36 82 30 76 38 C70 30 58 36 58 46 C58 56 76 70 76 70 C76 70 94 56 94 46 Z"
+    fill="#2a1a00" transform="translate(14, -6) scale(0.95)"/>
+  <!-- Heart fill -->
+  <path d="M94 46 C94 36 82 30 76 38 C70 30 58 36 58 46 C58 56 76 70 76 70 C76 70 94 56 94 46 Z"
+    fill="#FFD97D" transform="translate(15, -5) scale(0.88)"/>
+  <!-- Heart shine -->
+  <ellipse cx="84" cy="41" rx="4" ry="2.5" fill="#fff" opacity="0.4" transform="rotate(-20 84 41)"/>
+</svg>
