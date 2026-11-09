@@ -21,8 +21,8 @@
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/palsy.git
-cd palsy
+git clone https://github.com/zainab-rehmann/PALSY.git
+cd PALSY
 npm install
 ```
 
@@ -72,7 +72,7 @@ All tables have Row Level Security (RLS) enabled.
 
 ## 🎨 Tech Stack
 
-- **Frontend**: Next.js 15, React, TypeScript, Tailwind CSS
+- **Frontend**: Next.js 16, React, TypeScript, Tailwind CSS
 - **Backend**: Supabase (Auth, Database, Realtime, Storage)
 - **Icons**: Lucide React
 - **Fonts**: Nunito (Google Fonts)
