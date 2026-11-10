@@ -56,6 +56,7 @@ export interface RoomMember {
   room_id: string;
   user_id: string;
   role: 'owner' | 'moderator' | 'member';
+  muted: boolean;
   joined_at: string;
   profile?: Profile;
 }
@@ -67,6 +68,9 @@ export interface Message {
   receiver_id: string | null;
   content: string | null;
     media_url: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  edited_at: string | null;
   type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'voice';
   is_deleted: boolean;
   reply_to: string | null;
