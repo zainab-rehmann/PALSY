@@ -66,6 +66,7 @@ export interface Message {
   sender_id: string;
   receiver_id: string | null;
   content: string | null;
+    media_url: string | null;
   type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'voice';
   is_deleted: boolean;
   reply_to: string | null;
