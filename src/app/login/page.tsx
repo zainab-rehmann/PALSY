@@ -31,7 +31,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'linear-gradient(135deg,#FFF7FA 0%,#F5F9FF 60%,#FCE3EE 100%)' }}>
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'linear-gradient(135deg,#FFF9F0 0%,#FFF1E2 55%,#FFFE3EE100%)' }}>
       {/* Decorative floating elements */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         {[{ s: 120, t: '5%', l: '3%', c: 'rgba(169,201,245,0.15)', d: '7s' }, { s: 90, t: '75%', r: '2%', c: 'rgba(242,187,210,0.18)', d: '5s' }, { s: 60, t: '40%', r: '8%', c: 'rgba(220,235,255,0.2)', d: '8s' }].map((b, i) => (
