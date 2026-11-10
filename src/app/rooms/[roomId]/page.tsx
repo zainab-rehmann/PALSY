@@ -7,7 +7,7 @@ import type { Profile, Room, RoomMember, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, Hash, Lock,
-  Crown, Shield, LogOut, Trash2, X, Share2
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -33,6 +33,23 @@ export default function RoomPage() {
   const [myRole, setMyRole] = useState<'owner'|'moderator'|'member'>('member');
   const [tab, setTab] = useState<Tab>('chat');
   const [input, setInput] = useState('');
+  const [showEmojis, setShowEmojis] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [actionMsg, setActionMsg] = useState<string|null>(null);
+  const [editing, setEditing] = useState<Message|null>(null);
+  const [myMuted, setMyMuted] = useState(false);
+  const roomPicRef = useRef<HTMLInputElement>(null);
+  const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
+  const typingChannelRef = useRef<any>(null);
+  const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const lastTypingSentRef = useRef(0);
+  const [uploading, setUploading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordTime, setRecordTime] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder|null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordIntervalRef = useRef<ReturnType<typeof setInterval>|null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -52,6 +69,23 @@ export default function RoomPage() {
 
     const { data: mems } = await supabase.from('room_members').select('*,profile:profiles(*)').eq('room_id', roomId);
     setMembers(mems||[]);
+    const myRow = (mems||[]).find(m=>m.user_id===user.id);
+    if (myRow) setMyMuted(!!myRow.muted);
+
+    // Typing indicator channel (ephemeral broadcast, no database writes)
+    const tChan = supabase.channel(`typing-room-${roomId}`);
+    tChan
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (!payload.user_id || payload.user_id === user.id) return;
+        setTypingUsers(prev => ({ ...prev, [payload.user_id]: payload.name || 'Someone' }));
+        const prevTimer = typingTimeoutsRef.current.get(payload.user_id);
+        if (prevTimer) clearTimeout(prevTimer);
+        typingTimeoutsRef.current.set(payload.user_id, setTimeout(() => {
+          setTypingUsers(prev => { const n = { ...prev }; delete n[payload.user_id]; return n; });
+        }, 3000));
+      })
+      .subscribe();
+    typingChannelRef.current = tChan;
     const myMembership = (mems||[]).find(m=>m.user_id===user.id);
     if (!myMembership) { router.replace('/rooms'); return; }
     setMyRole(myMembership.role);
@@ -80,8 +114,135 @@ export default function RoomPage() {
     e.preventDefault();
     if (!input.trim() || !profile) return;
     const supabase = createClient();
+    setShowEmojis(false);
+    if (editing) {
+      const now = new Date().toISOString();
+      const { error } = await supabase.from('messages').update({ content: input.trim(), edited_at: now }).eq('id', editing.id).eq('sender_id', profile.id);
+      if (!error) {
+        setMessages(m=>m.map(x=>x.id===editing.id ? { ...x, content: input.trim(), edited_at: now } : x));
+        setEditing(null);
+        setInput('');
+      }
+      return;
+    }
     await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: input.trim(), type: 'text' });
     setInput('');
+  }
+
+  // Long-press (touch) or right-click on my own message opens Edit/Delete
+  const pressTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  function startPress(id: string) {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(()=>setActionMsg(id), 450);
+  }
+  function endPress() {
+    if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
+  }
+  function startEdit(msg: Message) {
+    setEditing(msg);
+    setInput(msg.content||'');
+    setActionMsg(null);
+    setTimeout(()=>inputRef.current?.focus(), 50);
+  }
+  async function deleteRoomMessage(msgId: string) {
+    const supabase = createClient();
+    await supabase.from('messages').update({ is_deleted: true, content: null }).eq('id', msgId).eq('sender_id', profile!.id);
+    setMessages(m=>m.filter(x=>x.id!==msgId));
+    setActionMsg(null);
+  }
+
+  async function uploadRoomPic(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !profile || !room) return;
+    const supabase = createClient();
+    const ext = file.name.split('.').pop() || 'jpg';
+    const path = `${profile.id}/room-${roomId}-${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('media').upload(path, file, { upsert: true });
+    if (upErr) { alert('Upload failed. Please try again.'); return; }
+    const { data: pub } = supabase.storage.from('media').getPublicUrl(path);
+    const { error } = await supabase.from('rooms').update({ avatar_url: pub.publicUrl }).eq('id', roomId);
+    if (error) { alert('Only the room owner can change the room picture.'); return; }
+    setRoom({ ...room, avatar_url: pub.publicUrl });
+  }
+
+  async function setRoomTheme(key: string) {
+    if (!room || myRole!=='owner') return;
+    const p = PRESETS[key];
+    const supabase = createClient();
+    const { error } = await supabase.from('rooms').update({ preset: key, accent_color: p.accent }).eq('id', roomId);
+    if (error) { alert('Only the room owner can change the theme.'); return; }
+    setRoom({ ...room, preset: key, accent_color: p.accent });
+  }
+
+  async function toggleMute() {
+    if (!profile) return;
+    const supabase = createClient();
+    const next = !myMuted;
+    const { error } = await supabase.from('room_members').update({ muted: next }).eq('room_id', roomId).eq('user_id', profile.id);
+    if (!error) setMyMuted(next);
+  }
+
+  function broadcastTyping() {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < 2000 || !profile) return;
+    lastTypingSentRef.current = now;
+    typingChannelRef.current?.send({ type: 'broadcast', event: 'typing', payload: { user_id: profile.id, name: profile.display_name || profile.username } });
+  }
+
+  async function handleRoomFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !profile) return;
+    setUploading(true);
+    const supabase = createClient();
+    const ext = file.name.split('.').pop();
+    const fileName = `${profile.id}/${Date.now()}.${ext}`;
+    const { data, error } = await supabase.storage.from('media').upload(fileName, file);
+    if (!error && data) {
+      const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
+      let type: 'text' | 'image' | 'video' | 'audio' | 'file' = 'file';
+      if (file.type.startsWith('image/')) type = 'image';
+      else if (file.type.startsWith('video/')) type = 'video';
+      else if (file.type.startsWith('audio/')) type = 'audio';
+      await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: file.name, media_url: publicUrl, type });
+    }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  async function startRoomRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (audioBlob.size < 1000 || !profile) return;
+        setUploading(true);
+        const supabase = createClient();
+        const fileName = `${profile.id}/voice_${Date.now()}.webm`;
+        const { data, error } = await supabase.storage.from('media').upload(fileName, audioBlob, { contentType: 'audio/webm' });
+        if (!error && data) {
+          const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
+          await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: 'Voice message', media_url: publicUrl, type: 'audio' });
+        }
+        setUploading(false);
+      };
+      recorder.start();
+      setIsRecording(true);
+      setRecordTime(0);
+      recordIntervalRef.current = setInterval(() => setRecordTime(t => t + 1), 1000);
+    } catch {
+      alert('Microphone access denied. Please allow microphone access to send voice messages.');
+    }
+  }
+
+  function stopRoomRecording() {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+    if (recordIntervalRef.current) { clearInterval(recordIntervalRef.current); recordIntervalRef.current = null; }
   }
 
   async function leaveRoom() {
@@ -113,7 +274,9 @@ export default function RoomPage() {
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(255,255,255,0.4)'}}>
         <Link href="/rooms" className="p-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}><ArrowLeft size={18} style={{color:accentColor}}/></Link>
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{background:'rgba(255,255,255,0.7)'}}>{preset?.emoji||room.name[0].toUpperCase()}</div>
+                  {room.avatar_url
+? <img src={room.avatar_url} alt={room.name} className="w-9 h-9 rounded-xl object-cover"/>
+: <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{background:'rgba(255,255,255,0.7)'}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
         <div className="flex-1 min-w-0">
           <p className="font-black text-sm theme-text truncate">{room.name}</p>
           <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{members.length} members · {members.filter(m=>(m.profile as Profile)?.is_online).length} online</p>
@@ -126,7 +289,7 @@ export default function RoomPage() {
 
       {/* Tab bar */}
       <div className="flex px-4 pt-3 gap-1 flex-shrink-0" style={{background:'rgba(255,255,255,0.7)'}}>
-        {(['chat','members','games','settings'] as Tab[]).filter(t=>t!=='settings'||myRole==='owner'||myRole==='moderator').map(t=>(
+        {(['chat','members','games','settings'] as Tab[]).map(t=>(
           <button key={t} onClick={()=>setTab(t)}
             className="px-4 py-2 rounded-t-xl text-xs font-bold capitalize transition-all"
             style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?accentColor:'var(--color-text-muted)',borderBottom:tab===t?`2px solid ${accentColor}`:undefined}}>
@@ -155,19 +318,77 @@ export default function RoomPage() {
                     {!mine && <Avatar profile={sender||{}} size={28}/>}
                     <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-0.5`}>
                       {!mine && <span className="text-xs font-bold px-1" style={{color:accentColor}}>{sender?.display_name||sender?.username}</span>}
-                      <div className="px-4 py-2.5 rounded-2xl text-sm"
-                        style={{background:mine?accentColor+22:'rgba(255,255,255,0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:'var(--color-text)'}}>
-                        {msg.content}
+                      <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
+                        style={{background:mine?accentColor+22:'rgba(255,255,255,0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:'var(--color-text)'}}
+                        onContextMenu={e=>{if(mine){e.preventDefault();setActionMsg(msg.id);}}}
+                        onTouchStart={()=>{if(mine) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}>
+                        {msg.type === 'image' && msg.media_url && (
+                          <div className="mb-1 rounded-xl overflow-hidden max-w-xs">
+                            <img src={msg.media_url} alt="shared image" className="w-full object-cover rounded-xl" />
+                          </div>
+                        )}
+                        {msg.type === 'video' && msg.media_url && (
+                          <div className="mb-1 rounded-xl overflow-hidden max-w-xs">
+                            <video src={msg.media_url} controls className="w-full rounded-xl" />
+                          </div>
+                        )}
+                        {msg.type === 'audio' && msg.media_url && (
+                          <div className="py-1">
+                            <audio src={msg.media_url} controls className="h-8 max-w-[220px]" />
+                          </div>
+                        )}
+                        {msg.type === 'file' && msg.media_url && (
+                          <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline text-xs py-1">
+                            <FileText size={16} /> {msg.content || 'Download Attachment'}
+                          </a>
+                        )}
+                        {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.content}
+                        {actionMsg===msg.id && mine && (
+                          <div className="absolute bottom-full mb-1 right-0 flex gap-1 p-1.5 rounded-2xl z-20" style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
+                            <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
+                            <button onClick={()=>deleteRoomMessage(msg.id)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}><Trash2 size={12}/> Delete</button>
+                            <button onClick={()=>setActionMsg(null)} className="text-xs p-1"><X size={12}/></button>
+                          </div>
+                        )}
                       </div>
-                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{msg.edited_at?' · edited':''}</span>
                     </div>
                   </div>
                 );
               })}
               <div ref={bottomRef}/>
             </div>
-            <form onSubmit={sendMessage} className="flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',backdropFilter:'blur(8px)',borderTop:`1px solid ${accentColor}22`}}>
-              <textarea value={input} onChange={e=>{setInput(e.target.value);e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,100)+'px';}}
+            {Object.values(typingUsers).length > 0 && (
+              <div className="px-4 py-1.5 text-xs flex-shrink-0" style={{background:'rgba(255,255,255,0.85)',color:'var(--color-text-muted)'}}>
+                <span className="font-semibold" style={{color:accentColor}}>{Object.values(typingUsers)[0]}</span>
+                {Object.values(typingUsers).length > 1 ? ' and others are typing' : ' is typing'}<span className="animate-pulse">…</span>
+              </div>
+            )}
+            <form onSubmit={sendMessage} className="relative flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',backdropFilter:'blur(8px)',borderTop:`1px solid ${accentColor}22`}}>
+              {showEmojis && (
+                <div className="absolute left-4 z-30" style={{bottom:'calc(100% + 8px)'}}>
+                  <EmojiPicker onPick={(e)=>{setInput(prev=>prev+e); inputRef.current?.focus();}} />
+                </div>
+              )}
+              {editing && (
+                <div className="absolute left-0 right-0 flex items-center gap-2 px-4 py-2 text-xs z-20" style={{bottom:'100%',background:`${accentColor}22`,borderTop:`1px solid ${accentColor}33`,color:'var(--color-text-muted)'}}>
+                  <Pencil size={12}/>
+                  <span className="flex-1 truncate">Editing your message</span>
+                  <button type="button" onClick={()=>{setEditing(null); setInput('');}}><X size={14}/></button>
+                </div>
+              )}
+              <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip" className="hidden" onChange={handleRoomFileUpload}/>
+              <button type="button" disabled={uploading} onClick={() => fileInputRef.current?.click()} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background:`${accentColor}22`,color:accentColor}} title="Attach media">
+                <Paperclip size={18}/>
+              </button>
+              <button type="button" onClick={isRecording ? stopRoomRecording : startRoomRecording} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: isRecording ? '#FF6B6B' : `${accentColor}22`, color: isRecording ? 'white' : accentColor}} title={isRecording ? 'Stop recording' : 'Record voice message'}>
+                {isRecording ? <Square size={16}/> : <Mic size={18}/>}
+              </button>
+              {isRecording && <span className="text-xs font-bold flex-shrink-0" style={{color:'#FF6B6B'}}>{Math.floor(recordTime/60)}:{String(recordTime%60).padStart(2,'0')}</span>}
+              <button type="button" onClick={() => setShowEmojis(v=>!v)} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showEmojis ? accentColor : `${accentColor}22`, color: showEmojis ? 'white' : accentColor}} title="Add emoji">
+                <Smile size={18}/>
+              </button>
+              <textarea ref={inputRef} value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,100)+'px';}}
                 onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
                 placeholder="Say something nice... ♡" rows={1}
                 className="flex-1 py-3 px-4 rounded-2xl resize-none text-sm"
@@ -204,8 +425,51 @@ export default function RoomPage() {
 
         {tab==='games' && <GamesTab roomId={roomId} profile={profile} accentColor={accentColor}/>}
 
-        {tab==='settings' && (myRole==='owner'||myRole==='moderator') && (
+        {tab==='settings' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
+              <h3 className="font-black theme-text">Room Picture</h3>
+              <div className="flex items-center gap-3">
+                {room.avatar_url
+                  ? <img src={room.avatar_url} alt={room.name} className="w-16 h-16 rounded-2xl object-cover"/>
+                  : <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl" style={{background:`${accentColor}22`}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
+                <div className="flex-1">
+                  <p className="text-sm font-bold theme-text">{room.name}</p>
+                  <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{myRole==='owner' ? 'This is the picture everyone sees for this room.' : 'Only the room owner can change the picture.'}</p>
+                </div>
+                {myRole==='owner' && (
+                  <button onClick={()=>roomPicRef.current?.click()} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white flex-shrink-0" style={{background:accentColor}}>
+                    <Camera size={14}/> Change
+                  </button>
+                )}
+              </div>
+              <input ref={roomPicRef} type="file" accept="image/*" className="hidden" onChange={uploadRoomPic}/>
+            </div>
+            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
+              <h3 className="font-black theme-text">Room Theme</h3>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(PRESETS).map(([key,p])=>(
+                  <button key={key} onClick={()=>setRoomTheme(key)} disabled={myRole!=='owner'}
+                    className="p-3 rounded-2xl text-center transition-all hover:scale-[1.03]"
+                    style={{background:p.bg, border: room.preset===key ? `2px solid ${p.accent}` : '2px solid transparent', opacity: myRole==='owner'?1:0.7}}>
+                    <div className="text-2xl mb-1">{p.emoji}</div>
+                    <div className="text-[11px] font-bold capitalize" style={{color:'var(--color-text)'}}>{key.replace('-',' ')}</div>
+                  </button>
+                ))}
+              </div>
+              {myRole!=='owner' && <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Only the room owner can change the theme.</p>}
+            </div>
+            <div className="rounded-2xl p-4" style={{background:'rgba(255,255,255,0.8)'}}>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <h3 className="font-black theme-text flex items-center gap-2">{myMuted ? <BellOff size={16}/> : <Bell size={16}/>} Room Notifications</h3>
+                  <p className="text-xs mt-0.5" style={{color:'var(--color-text-muted)'}}>{myMuted ? 'You will not get pop-ups for this room.' : 'You get a pop-up when someone messages in this room.'}</p>
+                </div>
+                <button onClick={toggleMute} className="px-4 py-2 rounded-full text-xs font-bold text-white flex-shrink-0" style={{background: myMuted ? '#9CA3AF' : accentColor}}>
+                  {myMuted ? 'Muted' : 'On'}
+                </button>
+              </div>
+            </div>
             <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
               <h3 className="font-black theme-text">Room Info</h3>
               <div>
