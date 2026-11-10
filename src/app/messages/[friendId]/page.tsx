@@ -5,8 +5,10 @@ import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+
+import EmojiPicker from '@/components/EmojiPicker';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉'];
 
@@ -18,9 +20,16 @@ export default function DMPage() {
   const [friend, setFriend] = useState<Profile|null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [showEmojis, setShowEmojis] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [reactionMsg, setReactionMsg] = useState<string|null>(null);
+  const [editing, setEditing] = useState<Message|null>(null);
+  const [friendTyping, setFriendTyping] = useState(false);
+  const typingChannelRef = useRef<any>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const lastTypingSentRef = useRef(0);
   const [isRecording, setIsRecording] = useState(false);
   const [recordTime, setRecordTime] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -53,17 +62,45 @@ export default function DMPage() {
       setMessages(msgs||[]);
       setLoading(false);
 
+      // Chat is open -> everything from this friend counts as read
+      await supabase.from('messages')
+        .update({ read_at: new Date().toISOString(), delivered_at: new Date().toISOString() })
+        .eq('receiver_id', user.id).eq('sender_id', friendId).is('read_at', null);
+
       // Realtime subscription
       const channel = supabase.channel(`dm-${[user.id, friendId].sort().join('-')}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
           const msg = payload.new as Message;
           if ((msg.sender_id===user.id&&msg.receiver_id===friendId)||(msg.sender_id===friendId&&msg.receiver_id===user.id)) {
             const { data: full } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').eq('id', msg.id).single();
+            if (full && full.sender_id===friendId) {
+              setFriendTyping(false);
+              const now = new Date().toISOString();
+              await supabase.from('messages').update({ read_at: now, delivered_at: now }).eq('id', full.id);
+              full.read_at = now; full.delivered_at = now;
+            }
             if (full) setMessages(m=>[...m, full]);
           }
         })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
+          const upd = payload.new as Message;
+          setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, delivered_at: upd.delivered_at, read_at: upd.read_at } : x));
+        })
         .subscribe();
-      return () => { supabase.removeChannel(channel); };
+
+      // Typing indicator (ephemeral broadcast, no database writes)
+      const tChan = supabase.channel(`typing-dm-${[user.id, friendId].sort().join('-')}`);
+      tChan
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          if (payload.user_id === friendId) {
+            setFriendTyping(true);
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = setTimeout(() => setFriendTyping(false), 3000);
+          }
+        })
+        .subscribe();
+      typingChannelRef.current = tChan;
+      return () => { supabase.removeChannel(channel); supabase.removeChannel(tChan); };
     })();
   }, [router, friendId]);
 
@@ -156,8 +193,22 @@ export default function DMPage() {
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || !profile || sending) return;
+    setShowEmojis(false);
     setSending(true);
     const supabase = createClient();
+    if (editing) {
+      const now = new Date().toISOString();
+      const { error } = await supabase.from('messages')
+        .update({ content: input.trim(), edited_at: now })
+        .eq('id', editing.id).eq('sender_id', profile.id);
+      if (!error) {
+        setMessages(m=>m.map(x=>x.id===editing.id ? { ...x, content: input.trim(), edited_at: now } : x));
+        setEditing(null);
+        setInput('');
+      }
+      setSending(false);
+      return;
+    }
     const { error } = await supabase.from('messages').insert({
       sender_id: profile.id, receiver_id: friendId,
       content: input.trim(), type: 'text'
@@ -182,6 +233,28 @@ export default function DMPage() {
     const supabase = createClient();
     await supabase.from('messages').update({ is_deleted: true, content: null }).eq('id', msgId).eq('sender_id', profile!.id);
     setMessages(m=>m.map(msg=>msg.id===msgId?{...msg,is_deleted:true,content:null}:msg));
+  }
+
+  // Long-press (touch) opens the same menu as right-click
+  const pressTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  function startPress(id: string) {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(()=>setReactionMsg(id), 450);
+  }
+  function endPress() {
+    if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
+  }
+  function broadcastTyping() {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < 2000) return;
+    lastTypingSentRef.current = now;
+    typingChannelRef.current?.send({ type: 'broadcast', event: 'typing', payload: { user_id: profile?.id } });
+  }
+  function startEdit(msg: Message) {
+    setEditing(msg);
+    setInput(msg.content||'');
+    setReactionMsg(null);
+    setTimeout(()=>inputRef.current?.focus(), 50);
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0,1,2].map(i=><div key={i} style={{width:10,height:10,borderRadius:'50%',background:'var(--color-accent)',animation:'float 1s ease-in-out infinite',animationDelay:`${i*0.2}s`}}/>)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
@@ -223,6 +296,7 @@ export default function DMPage() {
                     borderRadius: mine?'20px 20px 4px 20px':'20px 20px 20px 4px',
                   }}
                   onContextMenu={e=>{e.preventDefault();setReactionMsg(msg.id);}}
+                  onTouchStart={()=>startPress(msg.id)} onTouchEnd={endPress} onTouchMove={endPress}
                 >
                   {/* Media Content */}
                   {msg.type === 'image' && msg.media_url && (
@@ -283,7 +357,11 @@ export default function DMPage() {
         className="hidden"
         accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
       />
-
+      {friendTyping && (
+        <div className="px-4 py-1.5 text-xs flex-shrink-0" style={{background:'var(--color-surface)',color:'var(--color-text-muted)'}}>
+          <span className="font-semibold" style={{color:'var(--color-accent)'}}>{friend?.display_name || friend?.username || 'Your friend'}</span> is typing<span className="animate-pulse">…</span>
+        </div>
+      )}
       {/* Input / Voice Bar */}
       {isRecording ? (
         <div className="flex items-center justify-between p-4 safe-bottom flex-shrink-0 animate-pulse" style={{background:'var(--color-surface)',borderTop:'1px solid var(--color-border)'}}>
@@ -324,9 +402,20 @@ export default function DMPage() {
             <Mic size={18} />
           </button>
 
+          <button
+            type="button"
+            onClick={() => setShowEmojis(v=>!v)}
+            className="p-3 rounded-full transition-all hover:scale-105"
+            style={{background: showEmojis ? 'var(--color-accent)' : 'var(--color-secondary)', color: showEmojis ? '#fff' : 'var(--color-accent)'}}
+            title="Add emoji"
+          >
+            <Smile size={18} />
+          </button>
+
           <div className="flex-1 relative">
             <textarea
-              value={input} onChange={e=>{setInput(e.target.value);e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px';}}
+              ref={inputRef}
+              value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px';}}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
               placeholder={uploading ? "Uploading media..." : "Say something nice... ♡"}
               disabled={uploading}
