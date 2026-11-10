@@ -512,6 +512,67 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
   const [game, setGame] = useState<Game|null>(null);
   const [gameState, setGameState] = useState<any>(null);
   const [players, setPlayers] = useState<any[]>([]);
+  const [liveGame, setLiveGame] = useState<Game|null>(null);
+  const openGameIdRef = useRef<string|null>(null);
+
+  const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = {
+    'tictactoe': { emoji:'⭕', name:'Tic Tac Toe', desc:'2 players' },
+    'rps': { emoji:'✊', name:'Rock Paper Scissors', desc:'2 players' },
+    'number-guess': { emoji:'🔢', name:'Number Guess', desc:'Multiplayer' },
+    'hangman': { emoji:'🔡', name:'Hangman', desc:'Multiplayer' },
+  };
+
+  async function refreshPlayers(gameId: string) {
+    const supabase = createClient();
+    const { data } = await supabase.from('game_players').select('*').eq('game_id', gameId);
+    setPlayers(data||[]);
+  }
+
+  function openGame(g: Game) {
+    openGameIdRef.current = g.id;
+    setGame(g);
+    setGameState(g.state);
+    setGameType(g.type);
+    refreshPlayers(g.id);
+  }
+
+  function closeGame() {
+    openGameIdRef.current = null;
+    setGameType(null);
+    setGame(null);
+    setGameState(null);
+    setPlayers([]);
+  }
+
+  // Discover the room's live game, and keep an open game in sync on
+  // every player's screen at run time (moves arrive via realtime).
+  useEffect(() => {
+    if (!profile) return;
+    const supabase = createClient();
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('games').select('*').eq('room_id', roomId).neq('status','finished').order('created_at', { ascending: false }).limit(1);
+      if (!cancelled && data && data[0]) setLiveGame(data[0] as Game);
+    })();
+    const channel = supabase.channel(`games-room-${roomId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'games', filter: `room_id=eq.${roomId}` }, (payload) => {
+        const g = payload.new as Game;
+        if (!g || !g.id) return;
+        if (openGameIdRef.current === g.id) {
+          setGame(g);
+          setGameState(g.state);
+          refreshPlayers(g.id);
+        }
+        if (g.status === 'finished') {
+          setLiveGame(live => (live && live.id === g.id ? null : live));
+        } else {
+          setLiveGame(g);
+        }
+      })
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, profile?.id]);
 
   async function startGame(type: string) {
     if (!profile) return;
@@ -526,25 +587,53 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       initialState = { word, guessed: [], wrongGuesses: [], winner: null, maxWrong: 6 };
     }
     const { data: g } = await supabase.from('games').insert({ room_id: roomId, type, status: 'active', state: initialState, created_by: profile.id }).select().single();
-    if (g) { setGame(g); setGameState(initialState); setGameType(type); await supabase.from('game_players').insert({ game_id: g.id, user_id: profile.id }); }
+    if (g) {
+      await supabase.from('game_players').insert({ game_id: g.id, user_id: profile.id });
+      setLiveGame(g as Game);
+      openGame(g as Game);
+    }
+  }
+
+  async function joinGame(g: Game) {
+    if (!profile) return;
+    const supabase = createClient();
+    await supabase.from('game_players').insert({ game_id: g.id, user_id: profile.id });
+    let current = g;
+    if (g.type === 'tictactoe') {
+      const st: any = g.state;
+      if (!st.playerO && st.playerX !== profile.id) {
+        const newState = { ...st, playerO: profile.id };
+        const { data } = await supabase.from('games').update({ state: newState }).eq('id', g.id).select().single();
+        if (data) current = data as Game;
+      }
+    }
+    openGame(current);
   }
 
   if (!gameType) return (
     <div className="flex-1 overflow-y-auto p-4">
+      {liveGame && (
+        <div className="mb-4 p-4 rounded-2xl flex items-center gap-3" style={{background:`${accentColor}22`,border:`2px solid ${accentColor}44`}}>
+          <span className="text-3xl">{GAME_META[liveGame.type]?.emoji || '🎮'}</span>
+          <div className="flex-1">
+            <p className="font-black text-sm theme-text">{GAME_META[liveGame.type]?.name || 'A game'} is live in this room!</p>
+            <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{liveGame.created_by===profile?.id ? 'You started this game — jump back in.' : 'A friend started this game — join and play together, live.'}</p>
+          </div>
+          <button onClick={()=>{ if (liveGame.created_by!==profile?.id) joinGame(liveGame); else openGame(liveGame); }}
+            className="px-4 py-2 rounded-full text-xs font-bold text-white flex-shrink-0" style={{background:accentColor}}>
+            {liveGame.created_by===profile?.id ? 'Open' : 'Join'}
+          </button>
+        </div>
+      )}
       <p className="text-sm font-bold mb-4 theme-text">Choose a game to play with your friends!</p>
       <div className="grid grid-cols-2 gap-3">
-        {[
-          { type:'tictactoe', emoji:'⭕', name:'Tic Tac Toe', desc:'2 players' },
-          { type:'rps', emoji:'✊', name:'Rock Paper Scissors', desc:'2 players' },
-          { type:'number-guess', emoji:'🔢', name:'Number Guess', desc:'Multiplayer' },
-          { type:'hangman', emoji:'🔡', name:'Hangman', desc:'Multiplayer' },
-        ].map(g=>(
-          <button key={g.type} onClick={()=>startGame(g.type)}
+        {Object.entries(GAME_META).map(([type, meta])=>(
+          <button key={type} onClick={()=>startGame(type)}
             className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]"
             style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
-            <span className="text-3xl">{g.emoji}</span>
-            <span className="font-black text-sm theme-text">{g.name}</span>
-            <span className="text-xs" style={{color:'var(--color-text-muted)'}}>{g.desc}</span>
+            <span className="text-3xl">{meta.emoji}</span>
+            <span className="font-black text-sm theme-text">{meta.name}</span>
+            <span className="text-xs" style={{color:'var(--color-text-muted)'}}>{meta.desc}</span>
           </button>
         ))}
       </div>
@@ -554,11 +643,17 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <div className="flex items-center gap-2 mb-4">
-        <button onClick={()=>{setGameType(null);setGame(null);}} className="p-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}>
+        <button onClick={closeGame} className="p-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}>
           <ArrowLeft size={16} style={{color:accentColor}}/>
         </button>
         <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':'Hangman'}</span>
+        <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{players.length} player{players.length===1?'':'s'} in</span>
       </div>
+      {gameType==='tictactoe' && gameState && !gameState.playerO && (
+        <div className="mb-3 p-3 rounded-2xl text-center text-sm font-bold theme-text" style={{background:`${accentColor}22`}}>
+          Waiting for a second player… ask a friend in this room to open Games and tap Join 💌
+        </div>
+      )}
       {gameType==='tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} onUpdate={(s: any)=>setGameState(s)}/>}
@@ -566,7 +661,6 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
     </div>
   );
 }
-
 function TicTacToe({ game, state, profile, accentColor, onUpdate }: any) {
   async function makeMove(idx: number) {
     if (!profile || state.board[idx] || state.winner) return;
