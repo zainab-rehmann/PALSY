@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+import EmojiPicker from '@/components/EmojiPicker';
+
 const PRESETS: Record<string,{bg:string;accent:string;emoji:string}> = {
   'cloudy-blue':{bg:'#DCEBFF',accent:'#7CA8E8',emoji:'☁️'},
   'strawberry-milk':{bg:'#FCE3EE',accent:'#E99ABD',emoji:'🍓'},
