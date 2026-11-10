@@ -25,7 +25,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{background:'linear-gradient(135deg,#FFF7FA 0%,#F5F9FF 60%,#FCE3EE 100%)'}}>
+    <div className="min-h-screen flex items-center justify-center p-4" style={{background:'linear-gradient(135deg,#FFF9F0 0%,#FFF1E2 55%,#FFE3EE 100%)'}}>
       <div className="w-full max-w-sm">
         <div className="flex justify-center mb-8"><PalsyLogo iconSize={44} textSize={32}/></div>
         <div className="theme-card p-7 space-y-5">
