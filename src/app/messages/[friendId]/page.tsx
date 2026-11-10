@@ -322,9 +322,19 @@ export default function DMPage() {
                   {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.content}
                   {/* Reaction picker on hover */}
                   {reactionMsg===msg.id && (
-                    <div className="absolute bottom-full mb-1 left-0 flex gap-1 p-2 rounded-2xl z-10" style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
+                    <div className="absolute bottom-full mb-1 left-0 flex flex-col gap-1 p-2 rounded-2xl z-10" style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
+                      <div className="flex gap-1">
                       {EMOJI_LIST.map(e=><button key={e} onClick={()=>addReaction(msg.id,e)} className="text-lg hover:scale-125 transition-transform">{e}</button>)}
                       <button onClick={()=>setReactionMsg(null)} className="text-xs p-1"><X size={12}/></button>
+                      </div>
+                      {mine && (
+                        <div className="flex gap-1 pt-1" style={{borderTop:'1px solid var(--color-border)'}}>
+                          {msg.type==='text' && (
+                            <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
+                          )}
+                          <button onClick={()=>{deleteMessage(msg.id); setReactionMsg(null);}} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}><Trash2 size={12}/> Delete</button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -340,6 +350,12 @@ export default function DMPage() {
                 )}
                 <span className="text-xs" style={{color:'var(--color-text-muted)'}}>
                   {new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+                  {mine && (msg.read_at
+                    ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-accent)'}}><CheckCheck size={13}/> Seen</span>
+                    : msg.delivered_at
+                      ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={13}/></span>
+                      : <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={13}/></span>)}
+                  {mine && msg.edited_at && <span className="ml-1 italic">· edited</span>}
                   {mine && <button onClick={()=>deleteMessage(msg.id)} className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{color:'#FF6B6B'}}>Delete</button>}
                 </span>
               </div>
@@ -379,7 +395,19 @@ export default function DMPage() {
           </div>
         </div>
       ) : (
-        <form onSubmit={sendMessage} className="flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'var(--color-surface)',borderTop:'1px solid var(--color-border)'}}>
+        <form onSubmit={sendMessage} className="relative flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'var(--color-surface)',borderTop:'1px solid var(--color-border)'}}>
+          {showEmojis && (
+            <div className="absolute left-4 z-30" style={{bottom:'calc(100% + 8px)'}}>
+              <EmojiPicker onPick={(e)=>{setInput(prev=>prev+e); inputRef.current?.focus();}} />
+            </div>
+          )}
+          {editing && (
+            <div className="absolute left-0 right-0 flex items-center gap-2 px-4 py-2 text-xs z-20" style={{bottom:'100%',background:'var(--color-secondary)',borderTop:'1px solid var(--color-border)',color:'var(--color-text-muted)'}}>
+              <Pencil size={12}/>
+              <span className="flex-1 truncate">Editing your message</span>
+              <button type="button" onClick={()=>{setEditing(null); setInput('');}}><X size={14}/></button>
+            </div>
+          )}
           <button
             type="button"
             disabled={uploading}
