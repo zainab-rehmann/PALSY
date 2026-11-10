@@ -12,6 +12,7 @@ export default function MessagesPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile|null>(null);
   const [friends, setFriends] = useState<Profile[]>([]);
+  const [unread, setUnread] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,6 +26,10 @@ export default function MessagesPage() {
       document.documentElement.setAttribute('data-theme', prof.theme||'blue');
       const { data: fships } = await supabase.from('friendships').select('*,friend:profiles!friend_id(*)').eq('user_id', user.id);
       setFriends((fships||[]).map(f=>f.friend as Profile));
+      const { data: un } = await supabase.from('messages').select('sender_id').eq('receiver_id', user.id).is('read_at', null).eq('is_deleted', false);
+      const counts: Record<string, number> = {};
+      (un||[]).forEach(r=>{ counts[r.sender_id] = (counts[r.sender_id]||0)+1; });
+      setUnread(counts);
       setLoading(false);
     })();
   }, [router]);
@@ -53,6 +58,7 @@ export default function MessagesPage() {
                 <p className="font-bold text-sm theme-text">{f.display_name||f.username}</p>
                 <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{f.is_online?'🟢 Online':'⚫ Offline'}</p>
               </div>
+              {unread[f.id] ? <span className="text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{background:'var(--color-accent)',color:'#fff'}}>{unread[f.id]} new</span> : null}
               <ChevronRight size={16} style={{color:'var(--color-text-muted)'}}/>
             </Link>
           ))}
