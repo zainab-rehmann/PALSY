@@ -19,10 +19,11 @@ export default function SignupPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+    const [successMsg, setSuccessMsg] = useState('');
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    setError(''); setSuccessMsg('');
     if (!email || !username || !password || !confirm) { setError('Please fill in all fields.'); return; }
     if (!validateEmail(email)) { setError('Please enter a valid email address.'); return; }
     if (username.length < 3) { setError('Username must be at least 3 characters.'); return; }
@@ -36,18 +37,31 @@ export default function SignupPage() {
     // Check username uniqueness
     const { data: existing } = await supabase.from('profiles').select('id').eq('username', username).single();
     if (existing) { setError('This username is already taken. Try another! ♡'); setLoading(false); return; }
-
-    const { error: signupErr } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { username, theme, display_name: username } }
+    const { data: signupData, error: signupErr } = await supabase.auth.signUp({
+            email, password,
+            options: {
+                      data: { username, theme, display_name: username },
+                      emailRedirectTo: `${window.location.origin}/auth/callback`,
+            }
     });
 
-    if (signupErr) { setError(signupErr.message); setLoading(false); return; }
-    router.replace('/dashboard');
+        if (signupErr) {
+                setError(signupErr.message === 'email rate limit exceeded'
+                                 ? 'Too many tries just now — please wait a little while and try again ♡'
+                                 : signupErr.message);
+                setLoading(false);
+                return;
+        }
+        if (signupData.session) {
+                router.replace('/dashboard');
+        } else {
+                setSuccessMsg('Account created! Check your email to confirm your account, then come back and log in ♡');
+                setLoading(false);
+        }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{background:'linear-gradient(135deg,#FFF7FA 0%,#F5F9FF 60%,#FCE3EE 100%)'}}>
+    <div className="min-h-screen flex items-center justify-center p-4" style={{background:'linear-gradient(135deg,#FFF9F0 0%,#FFF1E2 55%,#FFFE3EE100%)'}}>
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         {[{s:100,t:'8%',l:'5%',c:'rgba(169,201,245,0.15)',d:'6s'},{s:80,t:'80%',r:'3%',c:'rgba(242,187,210,0.18)',d:'5s'}].map((b,i)=>(
           <div key={i} className="absolute rounded-full" style={{width:b.s,height:b.s,top:b.t,left:(b as any).l,right:(b as any).r,background:b.c,animation:`float ${b.d} ease-in-out infinite`,animationDelay:`${i*0.5}s`}}/>
@@ -70,6 +84,12 @@ export default function SignupPage() {
               {error}
             </div>
           )}
+
+          {successMsg && (
+                  <div className="p-3 rounded-xl text-sm font-medium text-center" style={{background:'rgba(255,107,157,0.1)',color:'#D14D7E',border:'1px solid rgba(255,107,157,0.25)'}}>
+                    {successMsg}
+                  </div>
+                )}
 
           {/* Theme picker */}
           <div>
