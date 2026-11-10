@@ -79,7 +79,7 @@ export default function DashboardPage() {
         {/* Header */}
         <header className="sticky top-0 z-30 px-4 py-3 md:px-8 md:py-5 flex items-center justify-between"
           style={{background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)',backdropFilter:'blur(8px)'}}>
-          <div className="md:hidden"><PalsyLogo iconSize={28} textSize={22}/></div>
+          <div className="md:hidden"><PalsyLogo iconSize={34} textSize={22} colorful/></div>
           <div className="hidden md:block">
             <h1 className="text-xl font-black theme-text">
               Hey, {profile?.display_name || profile?.username}! ♡
