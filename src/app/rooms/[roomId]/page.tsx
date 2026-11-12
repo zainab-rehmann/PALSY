@@ -7,12 +7,14 @@ import type { Profile, Room, RoomMember, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, Hash, Lock,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks
 } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
+import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName } from '@/lib/chatTools';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 const PRESETS: Record<string,{bg:string;accent:string;emoji:string}> = {
   'cloudy-blue':{bg:'#DCEBFF',accent:'#7CA8E8',emoji:'☁️'},
@@ -56,6 +58,15 @@ export default function RoomPage() {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const lastMsgIdRef = useRef<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showChatMenu, setShowChatMenu] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'clear' | 'deleteSelected' | null>(null);
+  const [sendError, setSendError] = useState('');
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -96,22 +107,45 @@ export default function RoomPage() {
     const { data: msgs } = await supabase.from('messages')
       .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
       .eq('room_id', roomId).eq('is_deleted', false)
-      .order('created_at', { ascending: true }).limit(100);
-    setMessages(msgs||[]);
+      .order('created_at', { ascending: false })
+      .limit(CHAT_PAGE_SIZE);
+    const ordered = [...(msgs||[])].reverse();
+    setMessages(ordered);
+    setHasMore((msgs||[]).length === CHAT_PAGE_SIZE);
     setLoading(false);
 
     // Realtime
     const channel = supabase.channel(`room-${roomId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, async (payload) => {
         const { data: full } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').eq('id', payload.new.id).single();
-        if (full) setMessages(m=>[...m, full]);
+        if (full) setMessages(m=> m.some(x=>x.id===full.id) ? m : [...m, full]);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
+        const upd = payload.new as Message;
+        if (upd.is_deleted) {
+          setMessages(m=>m.filter(x=>x.id!==upd.id));
+        } else {
+          setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, content: upd.content, edited_at: upd.edited_at } : x));
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
+        const old = payload.old as Message;
+        if (old?.id) setMessages(m=>m.filter(x=>x.id!==old.id));
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [router, roomId]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({behavior:'smooth'}); }, [messages]);
+  // Scroll to bottom only when the newest message changes — never when
+  // older history is prepended.
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last && last.id !== lastMsgIdRef.current) {
+      lastMsgIdRef.current = last.id;
+      bottomRef.current?.scrollIntoView({behavior:'smooth'});
+    }
+  }, [messages]);
 
   // Members presence refresh: realtime can lag or drop, so re-read
   // members' status every 15s. The re-render is also what flips Online
@@ -130,6 +164,7 @@ export default function RoomPage() {
     if (!input.trim() || !profile) return;
     const supabase = createClient();
     setShowEmojis(false);
+    setSendError('');
     if (editing) {
       const now = new Date().toISOString();
       const { error } = await supabase.from('messages').update({ content: input.trim(), edited_at: now }).eq('id', editing.id).eq('sender_id', profile.id);
@@ -137,11 +172,123 @@ export default function RoomPage() {
         setMessages(m=>m.map(x=>x.id===editing.id ? { ...x, content: input.trim(), edited_at: now } : x));
         setEditing(null);
         setInput('');
+      } else {
+        setSendError("Couldn't save that edit. Please try again.");
       }
       return;
     }
-    await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: input.trim(), type: 'text' });
+    const text = input.trim();
+    // Optimistic: show the message instantly instead of waiting on realtime.
+    const tempId = `temp-${Date.now()}`;
+    const temp: Message = {
+      id: tempId, room_id: roomId, sender_id: profile.id, receiver_id: null,
+      content: text, media_url: null, delivered_at: null, read_at: null,
+      edited_at: null, type: 'text', is_deleted: false, reply_to: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      sender: profile, reactions: [],
+    };
+    setMessages(m=>[...m, temp]);
     setInput('');
+    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: text, type: 'text' }).select().single();
+    if (!error && data) {
+      setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
+    } else {
+      setMessages(m=>m.map(x=>x.id===tempId ? { ...x, failed: true } : x));
+      setSendError("Message couldn't be sent. Tap it to retry.");
+    }
+  }
+
+  async function retrySend(tempId: string) {
+    const msg = messages.find(m=>m.id===tempId);
+    if (!msg || !profile || !msg.content) return;
+    setSendError('');
+    const supabase = createClient();
+    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: msg.content, type: 'text' }).select().single();
+    if (!error && data) {
+      setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
+    } else {
+      setSendError("Still couldn't send. Check your connection and try again.");
+    }
+  }
+
+  // Load an older page of history, keeping the scroll position steady.
+  async function loadOlder() {
+    if (loadingOlder || !messages.length) return;
+    setLoadingOlder(true);
+    const supabase = createClient();
+    const oldest = messages[0].created_at;
+    const el = listRef.current;
+    const prevHeight = el ? el.scrollHeight : 0;
+    const { data } = await supabase.from('messages')
+      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+      .eq('room_id', roomId).eq('is_deleted', false)
+      .lt('created_at', oldest)
+      .order('created_at', { ascending: false })
+      .limit(CHAT_PAGE_SIZE);
+    const older = [...(data||[])].reverse();
+    setMessages(m=>[...older, ...m]);
+    setHasMore((data||[]).length === CHAT_PAGE_SIZE);
+    setLoadingOlder(false);
+    requestAnimationFrame(() => {
+      if (el) el.scrollTop = el.scrollHeight - prevHeight;
+    });
+  }
+
+  // --- Chat menu actions: export / clear / multi-select delete ---
+
+  async function exportRoomChat() {
+    if (!profile) return;
+    setShowChatMenu(false);
+    const supabase = createClient();
+    const all: Message[] = [];
+    const PAGE = 200;
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await supabase.from('messages')
+        .select('*,sender:profiles!sender_id(*)')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (!data || data.length === 0) break;
+      all.push(...(data as Message[]));
+      if (data.length < PAGE) break;
+    }
+    const title = `Room: ${room?.name || 'room'}`;
+    const text = buildTranscript(title, all, (m) => senderName(m, m.sender_id === profile.id ? 'You' : 'Member'));
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTextFile(`palsy-room-${room?.name || 'room'}-${stamp}.txt`, text);
+  }
+
+  async function clearRoomChat() {
+    const supabase = createClient();
+    await supabase.from('messages').delete().eq('room_id', roomId);
+    setMessages([]);
+    setHasMore(false);
+    setConfirmAction(null);
+  }
+
+  async function deleteRoomSelected() {
+    if (selectedIds.size === 0) return;
+    const supabase = createClient();
+    const ids = [...selectedIds];
+    await supabase.from('messages').delete().in('id', ids);
+    setMessages(m=>m.filter(x=>!selectedIds.has(x.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setConfirmAction(null);
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  // Who may select a message: everyone may select their own; the room
+  // owner and moderators may select any message.
+  function canSelect(msg: Message): boolean {
+    return msg.sender_id === profile?.id || myRole === 'owner' || myRole === 'moderator';
   }
 
   // Long-press (touch) or right-click on my own message opens Edit/Delete
@@ -218,7 +365,10 @@ export default function RoomPage() {
       if (file.type.startsWith('image/')) type = 'image';
       else if (file.type.startsWith('video/')) type = 'video';
       else if (file.type.startsWith('audio/')) type = 'audio';
-      await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: file.name, media_url: publicUrl, type });
+      const { error: insertErr } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: file.name, media_url: publicUrl, type });
+      if (insertErr) setSendError("Couldn't send that file. Please try again.");
+    } else {
+      setSendError("Upload failed. Please try again.");
     }
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -241,7 +391,8 @@ export default function RoomPage() {
         const { data, error } = await supabase.storage.from('media').upload(fileName, audioBlob, { contentType: 'audio/webm' });
         if (!error && data) {
           const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
-          await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: 'Voice message', media_url: publicUrl, type: 'audio' });
+          const { error: insertErr } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: 'Voice message', media_url: publicUrl, type: 'audio' });
+          if (insertErr) setSendError("Couldn't send that voice message. Please try again.");
         }
         setUploading(false);
       };
@@ -287,6 +438,14 @@ export default function RoomPage() {
   return (
     <div className="flex flex-col h-screen" style={{background:preset?.bg||'var(--color-bg)'}}>
       {/* Header */}
+      {selectMode && tab==='chat' ? (
+        <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(255,255,255,0.4)'}}>
+          <button onClick={()=>{setSelectMode(false); setSelectedIds(new Set());}} className="p-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}><X size={18} style={{color:accentColor}}/></button>
+          <p className="font-black text-sm theme-text flex-1">{selectedIds.size} selected</p>
+          <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-') && canSelect(m)).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)',color:'var(--color-text)'}}>Select all</button>
+          <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#FF6B6B',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
+        </header>
+      ) : (
       <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(255,255,255,0.4)'}}>
         <Link href="/rooms" className="p-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}><ArrowLeft size={18} style={{color:accentColor}}/></Link>
                   {room.avatar_url
@@ -300,7 +459,28 @@ export default function RoomPage() {
         <button onClick={copyInviteCode} className="p-2 rounded-xl transition-all" style={{background:'rgba(255,255,255,0.7)'}}>
           {copied?<Check size={16} style={{color:'#4ADE80'}}/>:<Share2 size={16} style={{color:accentColor}}/>}
         </button>
+        {tab==='chat' && (
+          <div className="relative">
+            <button onClick={()=>setShowChatMenu(v=>!v)} className="p-2 rounded-xl transition-all" style={{background:'rgba(255,255,255,0.7)'}} title="Chat options"><MoreVertical size={16} style={{color:accentColor}}/></button>
+            {showChatMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={()=>setShowChatMenu(false)}/>
+                <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl p-2 z-40 space-y-1" style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 8px 30px rgba(0,0,0,0.12)'}}>
+                  <button onClick={exportRoomChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:accentColor}}/> Export chat</button>
+                  <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:accentColor}}/> Select messages</button>
+                  {(myRole==='owner'||myRole==='moderator') && (
+                    <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'#FF6B6B'}}><Trash2 size={16}/> Clear chat</button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </header>
+      )}
+      {sendError && tab==='chat' && (
+        <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,107,107,0.12)',color:'#FF6B6B'}}>{sendError} <button onClick={()=>setSendError('')} className="underline ml-1">Dismiss</button></div>
+      )}
 
       {/* Tab bar */}
       <div className="flex px-4 pt-3 gap-1 flex-shrink-0" style={{background:'rgba(255,255,255,0.7)'}}>
@@ -317,7 +497,12 @@ export default function RoomPage() {
       <div className="flex-1 overflow-hidden flex flex-col">
         {tab==='chat' && (
           <>
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+            <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+              {hasMore && (
+                <div className="flex justify-center pb-1">
+                  <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'rgba(255,255,255,0.9)',color:accentColor,border:`1px solid ${accentColor}33`}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
+                </div>
+              )}
               {/* Welcome message */}
               {room.welcome_message && messages.length===0 && (
                 <div className="text-center py-6">
@@ -335,17 +520,25 @@ export default function RoomPage() {
                     <span className="text-[11px] font-bold px-3 py-1 rounded-full" style={{background:'rgba(255,255,255,0.9)',color:'var(--color-text-muted)',border:`1px solid ${accentColor}33`}}>{dayDividerLabel(msg.created_at)}</span>
                   </div>
                 ) : null;
+                const selected = selectedIds.has(msg.id);
+                const selectable = canSelect(msg);
                 return (
                   <Fragment key={msg.id}>
                     {divider}
-                  <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`}>
+                  <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`} style={selected?{background:'rgba(255,255,255,0.6)',borderRadius:16}:undefined} onClick={selectMode && selectable ? ()=>toggleSelect(msg.id) : undefined}>
+                    {selectMode && selectable && (
+                      <button onClick={()=>toggleSelect(msg.id)} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?accentColor:'rgba(0,0,0,0.25)',background:selected?accentColor:'transparent',color:'#fff'}}>
+                        {selected && <Check size={14}/>}
+                      </button>
+                    )}
                     {!mine && <Avatar profile={sender||{}} size={28}/>}
                     <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-0.5`}>
                       {!mine && <span className="text-xs font-bold px-1" style={{color:accentColor}}>{sender?.display_name||sender?.username}</span>}
                       <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
                         style={{background:mine?accentColor+22:'rgba(255,255,255,0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:'var(--color-text)'}}
-                        onContextMenu={e=>{if(mine){e.preventDefault();setActionMsg(msg.id);}}}
-                        onTouchStart={()=>{if(mine) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}>
+                        onContextMenu={e=>{if(mine && !selectMode){e.preventDefault();setActionMsg(msg.id);}}}
+                        onTouchStart={()=>{if(mine && !selectMode) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}
+                        onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}>
                         {msg.type === 'image' && msg.media_url && (
                           <div className="mb-1 rounded-xl overflow-hidden max-w-xs">
                             <img src={msg.media_url} alt="shared image" className="w-full object-cover rounded-xl" />
@@ -375,7 +568,7 @@ export default function RoomPage() {
                           </div>
                         )}
                       </div>
-                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{msg.edited_at?' · edited':''}</span>
+                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}</span>
                     </div>
                   </div>
                   </Fragment>
@@ -523,6 +716,24 @@ export default function RoomPage() {
           </div>
         )}
       </div>
+      {confirmAction === 'clear' && (
+        <ConfirmDialog
+          title="Clear this room's chat?"
+          message="This will delete all messages in this room for every member. This cannot be undone."
+          confirmLabel="Clear chat"
+          onConfirm={clearRoomChat}
+          onCancel={()=>setConfirmAction(null)}
+        />
+      )}
+      {confirmAction === 'deleteSelected' && (
+        <ConfirmDialog
+          title={`Delete ${selectedIds.size} message${selectedIds.size===1?'':'s'}?`}
+          message="These messages will be deleted for everyone in this room. This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={deleteRoomSelected}
+          onCancel={()=>setConfirmAction(null)}
+        />
+      )}
     </div>
   );
 }
