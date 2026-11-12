@@ -240,7 +240,24 @@ export default function DMPage() {
     setSending(false);
   }
 
-  async function addReaction(msgId: string, emoji: string) {
+  // Tap a reaction chip you already added to remove it; otherwise add it.
+  async function toggleReaction(msgId: string, emoji: string) {
+    const supabase = createClient();
+    const msg = messages.find(m => m.id === msgId);
+    const mine = msg?.reactions?.some((r: any) => r.user_id === profile!.id && r.emoji === emoji);
+    if (mine) {
+      await supabase.from('message_reactions').delete().eq('message_id', msgId).eq('user_id', profile!.id).eq('emoji', emoji);
+    } else {
+      await supabase.from('message_reactions').upsert({ message_id: msgId, user_id: profile!.id, emoji });
+    }
+    // Reload messages
+    const { data: msgs } = await supabase.from('messages')
+      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+      .or(`and(sender_id.eq.${profile!.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile!.id})`)
+      .order('created_at', { ascending: true }).limit(100);
+    setMessages(msgs||[]);
+  }
+async function addReaction(msgId: string, emoji: string) {
     const supabase = createClient();
     await supabase.from('message_reactions').upsert({ message_id: msgId, user_id: profile!.id, emoji });
     setReactionMsg(null);
@@ -365,7 +382,7 @@ export default function DMPage() {
                 {msg.reactions && msg.reactions.length>0 && (
                   <div className="flex gap-1 flex-wrap">
                     {Object.entries(msg.reactions.reduce((acc:Record<string,number>,r:any)=>({...acc,[r.emoji]:(acc[r.emoji]||0)+1}),{})).map(([emoji,count])=>(
-                      <button key={emoji} onClick={()=>addReaction(msg.id,emoji)} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs" style={{background:'var(--color-secondary)',border:'1px solid var(--color-border)'}}>
+                      <button key={emoji} onClick={()=>toggleReaction(msg.id,emoji)} title={msg.reactions?.some((r:any)=>r.user_id===profile?.id&&r.emoji===emoji) ? 'Tap to remove your reaction' : 'Tap to react'} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs" style={{background:'var(--color-secondary)',border:'1px solid var(--color-border)'}}>
                         {emoji} <span style={{color:'var(--color-text-muted)'}}>{count as number}</span>
                       </button>
                     ))}
