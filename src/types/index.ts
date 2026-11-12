@@ -8,6 +8,7 @@ export interface Profile {
   bio: string | null;
   avatar_url: string | null;
   theme: Theme;
+  notifications_enabled: boolean;
   is_online: boolean;
   last_seen: string;
   created_at: string;
@@ -129,3 +130,13 @@ export interface GamePlayer {
   profile?: Profile;
 }
 
+export interface AppNotification {
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+  is_read: boolean;
+  created_at: string;
+}
