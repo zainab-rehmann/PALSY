@@ -75,6 +75,9 @@ export interface Message {
   type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'voice';
   is_deleted: boolean;
   reply_to: string | null;
+  reply_to_id: string | null;
+  is_pinned: boolean;
+  pinned_at: string | null;
   created_at: string;
   updated_at: string;
   sender?: Profile;
