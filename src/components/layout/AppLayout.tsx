@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room, FriendRequest } from '@/types';
 import { PalsyLogo } from '@/components/branding/PalsyLogo';
+import NotificationBell from '@/components/NotificationBell';
 import {
   Home, Users, MessageCircle, Hash, Gamepad2, Settings, Bell, Plus, LogOut,
   Compass, UserPlus, ChevronRight, Circle, Moon
@@ -43,6 +44,7 @@ function MobileNav({ active }: { active: string }) {
             <span className="text-xs font-semibold">{label}</span>
           </Link>
         ))}
+        <NotificationBell variant="navItem"/>
       </div>
     </nav>
   );
@@ -82,6 +84,7 @@ function DesktopNav({ profile, active }: { profile: Profile|null; active: string
             <Icon size={18}/>{label}
           </Link>
         ))}
+        <NotificationBell variant="navRow"/>
       </div>
       {profile && (
         <div className="mt-auto space-y-2">
