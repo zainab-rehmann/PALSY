@@ -65,6 +65,26 @@ function FriendsContent() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // Presence refresh: realtime can lag or drop, so re-read everyone's
+  // status every 15s. The re-render is also what flips Online to
+  // "last seen ..." once a heartbeat goes stale.
+  useEffect(() => {
+    const supabase = createClient();
+    const t = setInterval(async () => {
+      const { data } = await supabase.from('profiles').select('id,is_online,last_seen').limit(100);
+      if (!data) return;
+      const byId = new Map(data.map(p => [p.id, p]));
+      const patch = (list: Profile[]) => list.map(f => {
+        const u = byId.get(f.id);
+        return u ? { ...f, is_online: u.is_online, last_seen: u.last_seen } : f;
+      });
+      setFriends(patch);
+      setSuggestions(patch);
+      setSearchResults(patch);
+    }, 15000);
+    return () => clearInterval(t);
+  }, []);
+
   // People on PALSY: shown when the Find tab opens, so it is never blank.
   const loadSuggestions = useCallback(async () => {
     if (suggestionsLoaded || !profileRef.current) return;
