@@ -47,6 +47,20 @@ export default function MessagesPage() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // Presence refresh: realtime can lag or drop, so re-read friends'
+  // status every 15s. The re-render is also what flips Online to
+  // "last seen ..." once a heartbeat goes stale.
+  useEffect(() => {
+    const supabase = createClient();
+    const t = setInterval(async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: fships } = await supabase.from('friendships').select('*,friend:profiles!friend_id(*)').eq('user_id', user.id);
+      if (fships) setFriends(fships.map(f=>f.friend as Profile));
+    }, 15000);
+    return () => clearInterval(t);
+  }, []);
+
   if (loading) return <Loading/>;
 
   return (
