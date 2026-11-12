@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { Profile, Friendship } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
 import { MessageCircle, Search, ChevronRight } from 'lucide-react';
+import { isFreshOnline, presenceLabel } from '@/lib/presence';
 import Link from 'next/link';
 
 export default function MessagesPage() {
@@ -34,6 +35,18 @@ export default function MessagesPage() {
     })();
   }, [router]);
 
+  // Live presence: refresh each friend's online / last-seen as it changes.
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase.channel('messages-presence')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, (payload) => {
+        const upd = payload.new as Profile;
+        setFriends(prev => prev.map(f => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen } : f));
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   if (loading) return <Loading/>;
 
   return (
@@ -53,10 +66,10 @@ export default function MessagesPage() {
             </div>
           ) : friends.map(f=>(
             <Link key={f.id} href={`/messages/${f.id}`} className="theme-card p-4 flex items-center gap-3 hover:scale-[1.01] transition-all">
-              <div className="relative"><Avatar profile={f} size={48}/><div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white" style={{background:f.is_online?'#4ADE80':'#9CA3AF'}}/></div>
+              <div className="relative"><Avatar profile={f} size={48}/><div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white" style={{background:isFreshOnline(f)?'#4ADE80':'#9CA3AF'}}/></div>
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-sm theme-text">{f.display_name||f.username}</p>
-                <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{f.is_online?'🟢 Online':'⚫ Offline'}</p>
+                <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{isFreshOnline(f)?'🟢 Online':presenceLabel(f)}</p>
               </div>
               {unread[f.id] ? <span className="text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{background:'var(--color-accent)',color:'#fff'}}>{unread[f.id]} new</span> : null}
               <ChevronRight size={16} style={{color:'var(--color-text-muted)'}}/>
