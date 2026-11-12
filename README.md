@@ -60,6 +60,14 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ---
 
+## ✅ CI/CD
+
+- **CI (GitHub Actions):** every push to `master` and every pull request runs the `CI` workflow (`.github/workflows/ci.yml`): clean install with `npm ci`, a TypeScript typecheck, a lint report, and a full production build (`npm run build`). A red ❌ on a commit means the build is broken — fix it before relying on the deploy.
+- **CD (Vercel):** pushing to `master` auto-deploys through Vercel's GitHub integration — no manual deploy step. Live app: https://palsy-app.vercel.app (backup: https://palsy-7cqz.vercel.app).
+- No secrets or tokens are used by CI. Branch protection / required checks are not enabled — merging stays open unless the owner decides otherwise.
+
+---
+
 ## 🗄️ Database
 
 Run `supabase/migrations/001_initial.sql` in your Supabase SQL Editor.
