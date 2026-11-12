@@ -256,8 +256,13 @@ export default function EmojiPicker({ onPick }: { onPick: (emoji: string) => voi
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const q = query.trim().toLowerCase();
+  // Match whole words by prefix ("cat" finds cat faces, not "vacation").
+  const qWords = q.split(/\s+/).filter(Boolean);
   const results = q
-    ? GROUPS.flatMap(g => g.emojis.filter(item => item.n.includes(q)).map(item => ({ ...item, group: g.label })))
+    ? GROUPS.flatMap(g => g.emojis.filter(item => {
+        const words = item.n.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+        return qWords.every(qw => words.some(w => w.startsWith(qw)));
+      }).map(item => ({ ...item, group: g.label })))
     : [];
 
   function jumpTo(id: string) {
