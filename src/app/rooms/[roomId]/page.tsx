@@ -7,13 +7,13 @@ import type { Profile, Room, RoomMember, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, Hash, Lock,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star
 } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
-import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName } from '@/lib/chatTools';
+import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import EntryCodePrompt from '@/components/EntryCodePrompt';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
@@ -69,6 +69,18 @@ export default function RoomPage() {
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'clear' | 'deleteSelected' | null>(null);
   const [sendError, setSendError] = useState('');
+  // Reply / pin / star
+  const [replyTo, setReplyTo] = useState<Message|null>(null);
+  const [quotedMap, setQuotedMap] = useState<Record<string, Message | null>>({});
+  const quotedFetchedRef = useRef<Set<string>>(new Set());
+  const [pinnedList, setPinnedList] = useState<Message[]>([]);
+  const [pinIndex, setPinIndex] = useState(0);
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
+  const [showStarred, setShowStarred] = useState(false);
+  const [starredMessages, setStarredMessages] = useState<Message[]>([]);
+  const [highlightId, setHighlightId] = useState<string|null>(null);
+  const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [jumpNote, setJumpNote] = useState('');
   // Entry-code gate (non-members of coded rooms) + settings (owner)
   const [needsCode, setNeedsCode] = useState(false);
   const [gateError, setGateError] = useState('');
@@ -143,7 +155,7 @@ export default function RoomPage() {
         if (upd.is_deleted) {
           setMessages(m=>m.filter(x=>x.id!==upd.id));
         } else {
-          setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, content: upd.content, edited_at: upd.edited_at } : x));
+          setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, content: upd.content, edited_at: upd.edited_at, is_pinned: upd.is_pinned, pinned_at: upd.pinned_at, reply_to_id: upd.reply_to_id } : x));
         }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
@@ -177,6 +189,53 @@ export default function RoomPage() {
     return () => clearInterval(t);
   }, [roomId]);
 
+  // Reply quotes + pinned bar: refresh whenever the loaded messages change.
+  useEffect(() => {
+    if (!profile) return;
+    const supabase = createClient();
+    const loaded = new Set(messages.map(m=>m.id));
+    const missing = [...new Set(messages.map(m=>m.reply_to_id).filter((id): id is string => !!id && !loaded.has(id) && !quotedFetchedRef.current.has(id)))];
+    if (missing.length) {
+      missing.forEach(id=>quotedFetchedRef.current.add(id));
+      supabase.from('messages').select('*,sender:profiles!sender_id(*)').in('id', missing).then(({ data }) => {
+        const found = new Map((data||[]).map((m:any)=>[m.id, m as Message]));
+        setQuotedMap(prev => { const next = { ...prev }; missing.forEach(id => { next[id] = found.get(id) ?? null; }); return next; });
+      });
+    }
+    supabase.from('messages').select('*,sender:profiles!sender_id(*)')
+      .eq('room_id', roomId).eq('is_pinned', true).order('pinned_at', { ascending: false })
+      .then(({ data }) => { setPinnedList((data||[]) as Message[]); setPinIndex(0); });
+  }, [messages, profile, roomId]);
+
+  // My own stars (private — only ever my own rows are readable).
+  useEffect(() => {
+    if (!profile) return;
+    const supabase = createClient();
+    supabase.from('message_stars').select('message_id').eq('user_id', profile.id).then(({ data }) => {
+      setStarredIds(new Set((data||[]).map((r:any)=>r.message_id)));
+    });
+  }, [profile]);
+
+  // Escape closes the message menu.
+  useEffect(() => {
+    if (!actionMsg) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setActionMsg(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [actionMsg]);
+
+  // Jump highlight: scroll to the target message once it is in the DOM.
+  useEffect(() => {
+    if (!highlightId) return;
+    let tries = 0;
+    const t = setInterval(() => {
+      const el = msgRefs.current[highlightId];
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); clearInterval(t); }
+      if (++tries > 12) clearInterval(t);
+    }, 120);
+    return () => clearInterval(t);
+  }, [highlightId, messages]);
+
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || !profile) return;
@@ -202,12 +261,14 @@ export default function RoomPage() {
       id: tempId, room_id: roomId, sender_id: profile.id, receiver_id: null,
       content: text, media_url: null, delivered_at: null, read_at: null,
       edited_at: null, type: 'text', is_deleted: false, reply_to: null,
+      reply_to_id: replyTo?.id ?? null, is_pinned: false, pinned_at: null,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       sender: profile, reactions: [],
     };
     setMessages(m=>[...m, temp]);
     setInput('');
-    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: text, type: 'text' }).select().single();
+    setReplyTo(null);
+    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: text, type: 'text', reply_to_id: replyTo?.id ?? null }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
     } else {
@@ -221,7 +282,7 @@ export default function RoomPage() {
     if (!msg || !profile || !msg.content) return;
     setSendError('');
     const supabase = createClient();
-    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: msg.content, type: 'text' }).select().single();
+    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: msg.content, type: 'text', reply_to_id: msg.reply_to_id ?? null }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
     } else {
@@ -229,23 +290,28 @@ export default function RoomPage() {
     }
   }
 
+  // One older page of history (oldest-first). Shared by the Load-older
+  // button and by jump-to-message, which pages until it finds its target.
+  async function fetchOlderPage(before: string): Promise<Message[]> {
+    const supabase = createClient();
+    const { data } = await supabase.from('messages')
+      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+      .eq('room_id', roomId).eq('is_deleted', false)
+      .lt('created_at', before)
+      .order('created_at', { ascending: false })
+      .limit(CHAT_PAGE_SIZE);
+    return [...(data||[])].reverse() as Message[];
+  }
+
   // Load an older page of history, keeping the scroll position steady.
   async function loadOlder() {
     if (loadingOlder || !messages.length) return;
     setLoadingOlder(true);
-    const supabase = createClient();
-    const oldest = messages[0].created_at;
     const el = listRef.current;
     const prevHeight = el ? el.scrollHeight : 0;
-    const { data } = await supabase.from('messages')
-      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
-      .eq('room_id', roomId).eq('is_deleted', false)
-      .lt('created_at', oldest)
-      .order('created_at', { ascending: false })
-      .limit(CHAT_PAGE_SIZE);
-    const older = [...(data||[])].reverse();
+    const older = await fetchOlderPage(messages[0].created_at);
     setMessages(m=>[...older, ...m]);
-    setHasMore((data||[]).length === CHAT_PAGE_SIZE);
+    setHasMore(older.length === CHAT_PAGE_SIZE);
     setLoadingOlder(false);
     requestAnimationFrame(() => {
       if (el) el.scrollTop = el.scrollHeight - prevHeight;
@@ -270,8 +336,19 @@ export default function RoomPage() {
       all.push(...(data as Message[]));
       if (data.length < PAGE) break;
     }
+    const replyIds = [...new Set(all.map(m=>m.reply_to_id).filter(Boolean))] as string[];
+    const quoteById = new Map<string, Message>();
+    if (replyIds.length) {
+      const { data: qd } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').in('id', replyIds);
+      (qd||[]).forEach((q:any)=>quoteById.set(q.id, q as Message));
+    }
     const title = `Room: ${room?.name || 'room'}`;
-    const text = buildTranscript(title, all, (m) => senderName(m, m.sender_id === profile.id ? 'You' : 'Member'));
+    const text = buildTranscript(title, all, (m) => senderName(m, m.sender_id === profile.id ? 'You' : 'Member'), (m) => {
+      if (!m.reply_to_id) return null;
+      const q = quoteById.get(m.reply_to_id);
+      if (!q) return '↩ Replying to a deleted message';
+      return `↩ Replying to ${senderName(q, q.sender_id === profile.id ? 'You' : 'Member')}: ${quoteSnippet(q)}`;
+    });
     const stamp = new Date().toISOString().slice(0, 10);
     downloadTextFile(`palsy-room-${room?.name || 'room'}-${stamp}.txt`, text);
   }
@@ -281,6 +358,8 @@ export default function RoomPage() {
     await supabase.from('messages').delete().eq('room_id', roomId);
     setMessages([]);
     setHasMore(false);
+    setPinnedList([]);
+    setReplyTo(null);
     setConfirmAction(null);
   }
 
@@ -290,6 +369,7 @@ export default function RoomPage() {
     const ids = [...selectedIds];
     await supabase.from('messages').delete().in('id', ids);
     setMessages(m=>m.filter(x=>!selectedIds.has(x.id)));
+    setReplyTo(null);
     setSelectedIds(new Set());
     setSelectMode(false);
     setConfirmAction(null);
@@ -322,7 +402,84 @@ export default function RoomPage() {
     setEditing(msg);
     setInput(msg.content||'');
     setActionMsg(null);
+    setReplyTo(null);
     setTimeout(()=>inputRef.current?.focus(), 50);
+  }
+
+  function startReply(msg: Message) {
+    setReplyTo(msg);
+    setEditing(null);
+    setActionMsg(null);
+    setTimeout(()=>inputRef.current?.focus(), 50);
+  }
+
+  async function togglePin(msg: Message) {
+    setActionMsg(null);
+    const supabase = createClient();
+    const { error } = await supabase.rpc('set_message_pinned', { p_message_id: msg.id, p_pin: !msg.is_pinned });
+    if (error) { setSendError("Couldn't change that pin. Please try again."); return; }
+    setMessages(m=>m.map(x=>x.id===msg.id ? { ...x, is_pinned: !msg.is_pinned, pinned_at: !msg.is_pinned ? new Date().toISOString() : null } : x));
+  }
+
+  async function toggleStar(msg: Message) {
+    setActionMsg(null);
+    if (!profile) return;
+    const supabase = createClient();
+    if (starredIds.has(msg.id)) {
+      await supabase.from('message_stars').delete().eq('user_id', profile.id).eq('message_id', msg.id);
+      setStarredIds(prev => { const n = new Set(prev); n.delete(msg.id); return n; });
+    } else {
+      await supabase.from('message_stars').insert({ user_id: profile.id, message_id: msg.id });
+      setStarredIds(prev => new Set(prev).add(msg.id));
+    }
+  }
+
+  async function openStarred() {
+    setShowChatMenu(false);
+    if (!profile) return;
+    const supabase = createClient();
+    const { data: rows } = await supabase.from('message_stars').select('message_id').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(200);
+    const ids = (rows||[]).map((r:any)=>r.message_id);
+    if (!ids.length) { setStarredMessages([]); setShowStarred(true); return; }
+    const { data } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').in('id', ids).order('created_at', { ascending: false });
+    const mine = (data||[]).filter((m:any)=>m.room_id===roomId);
+    setStarredMessages(mine as Message[]);
+    setShowStarred(true);
+  }
+
+  // Jump to a message (from a quote, the pinned bar, or Starred): load
+  // older pages until it is on screen, then scroll + highlight it.
+  async function jumpToMessage(id: string) {
+    setJumpNote('');
+    if (!messages.some(m=>m.id===id) && messages.length) {
+      let cursor = messages[0].created_at;
+      for (let i = 0; i < 10; i++) {
+        const batch = await fetchOlderPage(cursor);
+        if (!batch.length) break;
+        setMessages(m=>[...batch, ...m]);
+        setHasMore(batch.length === CHAT_PAGE_SIZE);
+        if (batch.some(m=>m.id===id)) break;
+        cursor = batch[0].created_at;
+        if (batch.length < CHAT_PAGE_SIZE) break;
+        await new Promise(r=>setTimeout(r, 60));
+      }
+    }
+    await new Promise(r=>setTimeout(r, 120));
+    setHighlightId(id);
+    setTimeout(()=>setHighlightId(h=>h===id?null:h), 2400);
+    setTimeout(()=>{
+      if (!msgRefs.current[id]) setJumpNote("Couldn't find that message — it may have been deleted.");
+    }, 1800);
+  }
+
+  // The quoted original for a reply: from loaded messages, else the
+  // fetched cache (null = deleted or gone, undefined = still loading).
+  function quotedOf(msg: Message): Message | null | undefined {
+    if (!msg.reply_to_id) return undefined;
+    const inList = messages.find(m=>m.id===msg.reply_to_id);
+    if (inList) return inList;
+    if (msg.reply_to_id in quotedMap) return quotedMap[msg.reply_to_id];
+    return undefined;
   }
   async function deleteRoomMessage(msgId: string) {
     const supabase = createClient();
@@ -439,7 +596,8 @@ export default function RoomPage() {
       if (file.type.startsWith('image/')) type = 'image';
       else if (file.type.startsWith('video/')) type = 'video';
       else if (file.type.startsWith('audio/')) type = 'audio';
-      const { error: insertErr } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: file.name, media_url: publicUrl, type });
+      const { error: insertErr } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: file.name, media_url: publicUrl, type, reply_to_id: replyTo?.id ?? null });
+      setReplyTo(null);
       if (insertErr) setSendError("Couldn't send that file. Please try again.");
     } else {
       setSendError("Upload failed. Please try again.");
@@ -465,7 +623,8 @@ export default function RoomPage() {
         const { data, error } = await supabase.storage.from('media').upload(fileName, audioBlob, { contentType: 'audio/webm' });
         if (!error && data) {
           const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
-          const { error: insertErr } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: 'Voice message', media_url: publicUrl, type: 'audio' });
+          const { error: insertErr } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: 'Voice message', media_url: publicUrl, type: 'audio', reply_to_id: replyTo?.id ?? null });
+          setReplyTo(null);
           if (insertErr) setSendError("Couldn't send that voice message. Please try again.");
         }
         setUploading(false);
@@ -557,6 +716,7 @@ export default function RoomPage() {
                 <div className="fixed inset-0 z-30" onClick={()=>setShowChatMenu(false)}/>
                 <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl p-2 z-40 space-y-1" style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 8px 30px rgba(0,0,0,0.12)'}}>
                   <button onClick={exportRoomChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:accentColor}}/> Export chat</button>
+                  <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:accentColor}}/> Starred messages</button>
                   <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:accentColor}}/> Select messages</button>
                   {(myRole==='owner'||myRole==='moderator') && (
                     <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'#FF6B6B'}}><Trash2 size={16}/> Clear chat</button>
@@ -587,6 +747,16 @@ export default function RoomPage() {
       <div className="flex-1 overflow-hidden flex flex-col">
         {tab==='chat' && (
           <>
+            {jumpNote && (
+              <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,255,255,0.85)',color:'var(--color-text-muted)'}}>{jumpNote} <button onClick={()=>setJumpNote('')} className="underline ml-1">Dismiss</button></div>
+            )}
+            {pinnedList.length > 0 && (
+              <button onClick={()=>{ const cur = pinnedList[pinIndex % pinnedList.length]; jumpToMessage(cur.id); setPinIndex(i=>i+1); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',borderBottom:`1px solid ${accentColor}33`}}>
+                <Pin size={14} style={{color:accentColor}} className="flex-shrink-0"/>
+                <span className="text-xs font-bold truncate" style={{color:'var(--color-text)'}}>{senderName(pinnedList[pinIndex % pinnedList.length], pinnedList[pinIndex % pinnedList.length].sender_id === profile?.id ? 'You' : 'Member')}: <span className="font-normal" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(pinnedList[pinIndex % pinnedList.length])}</span></span>
+                {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:accentColor}}>{pinnedList.length} pinned · tap to cycle</span>}
+              </button>
+            )}
             <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
               {hasMore && messages.length > 0 && (
                 <div className="flex justify-center pb-1">
@@ -615,7 +785,7 @@ export default function RoomPage() {
                 return (
                   <Fragment key={msg.id}>
                     {divider}
-                  <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`} style={selected?{background:'rgba(255,255,255,0.6)',borderRadius:16}:undefined} onClick={selectMode && selectable ? ()=>toggleSelect(msg.id) : undefined}>
+                  <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`} style={highlightId===msg.id?{background:'rgba(255,255,255,0.6)',borderRadius:16,outline:`2px solid ${accentColor}`,outlineOffset:2}:selected?{background:'rgba(255,255,255,0.6)',borderRadius:16}:undefined} onClick={selectMode && selectable ? ()=>toggleSelect(msg.id) : undefined}>
                     {selectMode && selectable && (
                       <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?accentColor:'rgba(0,0,0,0.25)',background:selected?accentColor:'transparent',color:'#fff'}}>
                         {selected && <Check size={14}/>}
@@ -626,9 +796,27 @@ export default function RoomPage() {
                       {!mine && <span className="text-xs font-bold px-1" style={{color:accentColor}}>{sender?.display_name||sender?.username}</span>}
                       <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
                         style={{background:mine?accentColor+22:'rgba(255,255,255,0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:'var(--color-text)'}}
-                        onContextMenu={e=>{if(mine && !selectMode){e.preventDefault();setActionMsg(msg.id);}}}
-                        onTouchStart={()=>{if(mine && !selectMode) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}
+                        onContextMenu={e=>{if(!selectMode){e.preventDefault();setActionMsg(msg.id);}}}
+                        onTouchStart={()=>{if(!selectMode) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}
                         onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}>
+                        {msg.reply_to_id && (() => {
+                          const q = quotedOf(msg);
+                          const gone = q === null || (q !== undefined && q !== null && q.is_deleted);
+                          return (
+                            <button onClick={(e)=>{ e.stopPropagation(); jumpToMessage(msg.reply_to_id!); }} className="block w-full text-left mb-1.5 px-2.5 py-1.5 rounded-xl" style={{background:'rgba(0,0,0,0.06)',borderLeft:`3px solid ${accentColor}`}}>
+                              {gone ? (
+                                <span className="text-xs italic" style={{color:'var(--color-text-muted)'}}>Message deleted</span>
+                              ) : q ? (
+                                <>
+                                  <span className="block text-xs font-bold" style={{color:accentColor}}>↩ {senderName(q, q.sender_id === profile?.id ? 'You' : 'Member')}</span>
+                                  <span className="block text-xs truncate" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(q)}</span>
+                                </>
+                              ) : (
+                                <span className="text-xs" style={{color:'var(--color-text-muted)'}}>…</span>
+                              )}
+                            </button>
+                          );
+                        })()}
                         {msg.type === 'image' && msg.media_url && (
                           <div className="mb-1 rounded-xl overflow-hidden max-w-xs">
                             <img src={msg.media_url} alt="shared image" className="w-full object-cover rounded-xl" />
@@ -650,15 +838,29 @@ export default function RoomPage() {
                           </a>
                         )}
                         {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.content}
-                        {actionMsg===msg.id && mine && (
-                          <div className="absolute bottom-full mb-1 right-0 flex gap-1 p-1.5 rounded-2xl z-20" style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
-                            <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
-                            <button onClick={()=>deleteRoomMessage(msg.id)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}><Trash2 size={12}/> Delete</button>
-                            <button onClick={()=>setActionMsg(null)} className="text-xs p-1"><X size={12}/></button>
+                        {actionMsg===msg.id && (
+                          <>
+                          <div className="fixed inset-0 z-[5]" onClick={()=>setActionMsg(null)}/>
+                          <div className={`absolute bottom-full mb-1 ${mine?'right-0':'left-0'} flex flex-col gap-1 p-1.5 rounded-2xl z-20`} style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
+                            <div className="flex gap-1">
+                              <button onClick={()=>startReply(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Reply size={12}/> Reply</button>
+                              {(myRole==='owner'||myRole==='moderator') && (
+                                <button onClick={()=>togglePin(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:msg.is_pinned?accentColor:`${accentColor}22`,color:msg.is_pinned?'#fff':'var(--color-text)'}}><Pin size={12}/> {msg.is_pinned?'Unpin':'Pin'}</button>
+                              )}
+                              <button onClick={()=>toggleStar(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Star size={12}/> {starredIds.has(msg.id)?'Unstar':'Star'}</button>
+                              <button onClick={()=>setActionMsg(null)} className="text-xs p-1"><X size={12}/></button>
+                            </div>
+                            {mine && (
+                              <div className="flex gap-1 pt-1" style={{borderTop:`1px solid ${accentColor}33`}}>
+                                <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
+                                <button onClick={()=>deleteRoomMessage(msg.id)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}><Trash2 size={12}/> Delete</button>
+                              </div>
+                            )}
                           </div>
+                          </>
                         )}
                       </div>
-                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}</span>
+                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:accentColor}}/>}{starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}</span>
                     </div>
                   </div>
                   </Fragment>
@@ -683,6 +885,13 @@ export default function RoomPage() {
                   <Pencil size={12}/>
                   <span className="flex-1 truncate">Editing your message</span>
                   <button type="button" onClick={()=>{setEditing(null); setInput('');}}><X size={14}/></button>
+                </div>
+              )}
+              {replyTo && !editing && (
+                <div className="absolute left-0 right-0 flex items-center gap-2 px-4 py-2 text-xs z-20" style={{bottom:'100%',background:`${accentColor}22`,borderTop:`1px solid ${accentColor}33`,color:'var(--color-text-muted)'}}>
+                  <Reply size={12}/>
+                  <span className="flex-1 truncate">Replying to <b style={{color:'var(--color-text)'}}>{senderName(replyTo, replyTo.sender_id===profile?.id?'You':'Member')}</b>: {quoteSnippet(replyTo)}</span>
+                  <button type="button" onClick={()=>setReplyTo(null)}><X size={14}/></button>
                 </div>
               )}
               <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip" className="hidden" onChange={handleRoomFileUpload}/>
@@ -864,6 +1073,29 @@ export default function RoomPage() {
           onConfirm={deleteRoomSelected}
           onCancel={()=>setConfirmAction(null)}
         />
+      )}
+      {showStarred && (
+        <>
+          <div className="fixed inset-0 z-40" style={{background:'rgba(0,0,0,0.35)'}} onClick={()=>setShowStarred(false)}/>
+          <div className="fixed inset-x-4 top-20 z-50 mx-auto max-w-md rounded-3xl p-4 max-h-[70vh] overflow-y-auto" style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 12px 40px rgba(0,0,0,0.2)'}}>
+            <div className="flex items-center gap-2 mb-3">
+              <Star size={18} style={{color:'#F5B301'}}/>
+              <p className="font-black text-sm theme-text flex-1">Starred messages</p>
+              <button onClick={()=>setShowStarred(false)} className="p-1.5 rounded-full" style={{background:`${accentColor}22`}}><X size={14}/></button>
+            </div>
+            {starredMessages.length===0 ? (
+              <p className="text-sm text-center py-6" style={{color:'var(--color-text-muted)'}}>No starred messages yet.<br/>Hold a message and tap Star ⭐ to keep it here — only you can see your stars.</p>
+            ) : starredMessages.map(m=>(
+              <button key={m.id} onClick={()=>{setShowStarred(false); jumpToMessage(m.id);}} className="w-full text-left px-3 py-2.5 rounded-2xl mb-1.5" style={{background:`${accentColor}22`}}>
+                <span className="flex items-baseline gap-2">
+                  <span className="text-xs font-bold" style={{color:accentColor}}>{senderName(m, m.sender_id===profile?.id?'You':'Member')}</span>
+                  <span className="text-[11px]" style={{color:'var(--color-text-muted)'}}>{new Date(m.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'})} {new Date(m.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+                </span>
+                <span className="block text-sm truncate theme-text">{quoteSnippet(m)}</span>
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
