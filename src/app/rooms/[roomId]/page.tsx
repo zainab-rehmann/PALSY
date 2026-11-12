@@ -7,7 +7,7 @@ import type { Profile, Room, RoomMember, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, Hash, Lock,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -506,7 +506,19 @@ export default function RoomPage() {
 
 // ============================================================
 // GAMES TAB — All 4 games inline
+// Rules (Nov 2026): nothing can be played until BOTH players are
+// in, every game has a Restart, and Hangman / Number Guess start
+// with two choices — one player sets the secret, the other guesses.
 // ============================================================
+
+function initialStateFor(type: string, creatorId: string): any {
+  if (type === 'tictactoe') return { board: Array(9).fill(null), currentPlayer: creatorId, playerX: creatorId, playerO: null, winner: null };
+  if (type === 'rps') return { choices: {}, winner: null, round: 1 };
+  if (type === 'number-guess') return { phase: 'choose', setterId: null, guesserId: null, secret: null, guesses: [], winner: null };
+  if (type === 'hangman') return { phase: 'choose', setterId: null, guesserId: null, word: null, guessed: [], wrongGuesses: [], maxWrong: 6, winner: null };
+  return {};
+}
+
 function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: Profile|null; accentColor: string }) {
   const [gameType, setGameType] = useState<string|null>(null);
   const [game, setGame] = useState<Game|null>(null);
@@ -518,9 +530,11 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
   const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = {
     'tictactoe': { emoji:'⭕', name:'Tic Tac Toe', desc:'2 players' },
     'rps': { emoji:'✊', name:'Rock Paper Scissors', desc:'2 players' },
-    'number-guess': { emoji:'🔢', name:'Number Guess', desc:'Multiplayer' },
-    'hangman': { emoji:'🔡', name:'Hangman', desc:'Multiplayer' },
+    'number-guess': { emoji:'🔢', name:'Number Guess', desc:'2 players' },
+    'hangman': { emoji:'🔡', name:'Hangman', desc:'2 players' },
   };
+
+  const bothIn = players.length >= 2;
 
   async function refreshPlayers(gameId: string) {
     const supabase = createClient();
@@ -577,18 +591,10 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
   async function startGame(type: string) {
     if (!profile) return;
     const supabase = createClient();
-    let initialState: any = {};
-    if (type==='tictactoe') initialState = { board: Array(9).fill(null), currentPlayer: profile.id, playerX: profile.id, playerO: null, winner: null };
-    if (type==='rps') initialState = { choices: {}, winner: null, round: 1 };
-    if (type==='number-guess') initialState = { secret: Math.floor(Math.random()*100)+1, guesses: [], winner: null };
-    if (type==='hangman') {
-      const words = ['elephant','rainbow','friendship','butterfly','adventure','discovery','telescope','waterfall'];
-      const word = words[Math.floor(Math.random()*words.length)];
-      initialState = { word, guessed: [], wrongGuesses: [], winner: null, maxWrong: 6 };
-    }
-    const { data: g } = await supabase.from('games').insert({ room_id: roomId, type, status: 'active', state: initialState, created_by: profile.id }).select().single();
+    const initialState = initialStateFor(type, profile.id);
+    const { data: g } = await supabase.from('games').insert({ room_id: roomId, type, status: 'waiting', state: initialState, created_by: profile.id }).select().single();
     if (g) {
-      await supabase.from('game_players').insert({ game_id: g.id, user_id: profile.id });
+      await supabase.from('game_players').upsert({ game_id: g.id, user_id: profile.id }, { onConflict: 'game_id,user_id' });
       setLiveGame(g as Game);
       openGame(g as Game);
     }
@@ -597,17 +603,39 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
   async function joinGame(g: Game) {
     if (!profile) return;
     const supabase = createClient();
-    await supabase.from('game_players').insert({ game_id: g.id, user_id: profile.id });
-    let current = g;
-    if (g.type === 'tictactoe') {
-      const st: any = g.state;
-      if (!st.playerO && st.playerX !== profile.id) {
-        const newState = { ...st, playerO: profile.id };
-        const { data } = await supabase.from('games').update({ state: newState }).eq('id', g.id).select().single();
-        if (data) current = data as Game;
-      }
+    await supabase.from('game_players').upsert({ game_id: g.id, user_id: profile.id }, { onConflict: 'game_id,user_id' });
+    const { data: plist } = await supabase.from('game_players').select('*').eq('game_id', g.id);
+    const count = (plist || []).length;
+    const st: any = { ...(g.state as any) };
+    if (g.type === 'tictactoe' && !st.playerO && st.playerX !== profile.id) {
+      st.playerO = profile.id;
     }
-    openGame(current);
+    // Touch the game row so every open screen refreshes its player list
+    // and the waiting banner lifts the moment the second player joins.
+    const { data } = await supabase.from('games').update({ state: st, status: count >= 2 ? 'active' : 'waiting' }).eq('id', g.id).select().single();
+    openGame((data as Game) || g);
+    if (plist) setPlayers(plist);
+  }
+
+  // Restart: a clean round for BOTH players, live. Tic Tac Toe keeps its
+  // X/O seats; Hangman / Number Guess go back to the two choices.
+  async function restartGame() {
+    if (!profile || !game || !gameState) return;
+    const supabase = createClient();
+    const fresh = initialStateFor(game.type, game.created_by);
+    if (game.type === 'tictactoe') {
+      fresh.playerX = gameState.playerX || game.created_by;
+      fresh.playerO = gameState.playerO || null;
+      fresh.currentPlayer = fresh.playerX;
+    }
+    if (game.type === 'rps') fresh.round = (gameState.round || 1) + 1;
+    const { data } = await supabase.from('games').update({ state: fresh, status: 'active', winner_id: null }).eq('id', game.id).select().single();
+    if (data) {
+      setGame(data as Game);
+      setGameState((data as Game).state);
+    } else {
+      setGameState(fresh);
+    }
   }
 
   if (!gameType) return (
@@ -625,7 +653,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
           </button>
         </div>
       )}
-      <p className="text-sm font-bold mb-4 theme-text">Choose a game to play with your friends!</p>
+      <p className="text-sm font-bold mb-4 theme-text">Choose a game to play with your friends! Both players must be in before a game starts.</p>
       <div className="grid grid-cols-2 gap-3">
         {Object.entries(GAME_META).map(([type, meta])=>(
           <button key={type} onClick={()=>startGame(type)}
@@ -648,31 +676,38 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         </button>
         <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':'Hangman'}</span>
         <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{players.length} player{players.length===1?'':'s'} in</span>
+        <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
+          style={{background:accentColor, opacity: bothIn ? 1 : 0.45}}>
+          <RotateCcw size={13}/> Restart
+        </button>
       </div>
-      {gameType==='tictactoe' && gameState && !gameState.playerO && (
+      {!bothIn && (
         <div className="mb-3 p-3 rounded-2xl text-center text-sm font-bold theme-text" style={{background:`${accentColor}22`}}>
-          Waiting for a second player… ask a friend in this room to open Games and tap Join 💌
+          Waiting for the second player… ask a friend in this room to open Games and tap Join 💌
+          <span className="block text-xs font-semibold mt-1" style={{color:'var(--color-text-muted)'}}>The game starts when both players are in.</span>
         </div>
       )}
-      {gameType==='tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='hangman' && game && <Hangman game={game} state={gameState} profile={profile} accentColor={accentColor} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='hangman' && game && <Hangman game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
     </div>
   );
 }
-function TicTacToe({ game, state, profile, accentColor, onUpdate }: any) {
+
+function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
   async function makeMove(idx: number) {
-    if (!profile || state.board[idx] || state.winner) return;
+    if (!profile || !canPlay || !state.playerO || state.board[idx] || state.winner) return;
     if (state.currentPlayer !== profile.id) return;
     const newBoard = [...state.board];
     const symbol = state.playerX === profile.id ? 'X' : 'O';
     newBoard[idx] = { player: profile.id, symbol };
     const winner = checkWinner(newBoard);
-    const nextPlayer = state.playerO && state.currentPlayer===state.playerX ? state.playerO : state.playerX;
+    const nextPlayer = state.currentPlayer===state.playerX ? state.playerO : state.playerX;
     const newState = { ...state, board: newBoard, currentPlayer: nextPlayer, winner };
     const supabase = createClient();
-    await supabase.from('games').update({ state: newState, status: winner?'finished':'active', winner_id: winner?.player||null }).eq('id', game.id);
+    await supabase.from('games').update({ state: newState, status: winner?'finished':'active', winner_id: winner && winner!=='draw' ? winner.player : null }).eq('id', game.id);
     onUpdate(newState);
   }
 
@@ -691,15 +726,18 @@ function TicTacToe({ game, state, profile, accentColor, onUpdate }: any) {
       {state.winner ? (
         <div className="text-center p-4 rounded-2xl" style={{background:`${accentColor}22`}}>
           <p className="font-black text-lg theme-text">{state.winner==='draw'?'It\'s a draw! 🤝':`${state.winner.symbol} wins! 🎉`}</p>
+          <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>Tap Restart above to play again together.</p>
         </div>
+      ) : !canPlay ? (
+        <p className="text-sm font-bold text-center theme-text">Waiting for the second player to join…</p>
       ) : (
         <p className="text-sm font-bold text-center theme-text">{myTurn?'Your turn! ✨':'Waiting for other player...'}</p>
       )}
       <div className="grid grid-cols-3 gap-2 max-w-xs mx-auto">
         {state.board.map((cell: any, i: number)=>(
-          <button key={i} onClick={()=>makeMove(i)}
+          <button key={i} onClick={()=>makeMove(i)} disabled={!canPlay || !!state.winner}
             className="aspect-square rounded-2xl text-3xl font-black flex items-center justify-center transition-all hover:scale-105"
-            style={{background:cell?`${accentColor}22`:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}44`,color:accentColor}}>
+            style={{background:cell?`${accentColor}22`:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}44`,color:accentColor,opacity:(!canPlay||state.winner)?0.6:1}}>
             {cell?.symbol}
           </button>
         ))}
@@ -708,9 +746,9 @@ function TicTacToe({ game, state, profile, accentColor, onUpdate }: any) {
   );
 }
 
-function RPS({ game, state, profile, accentColor, onUpdate }: any) {
+function RPS({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
   async function choose(choice: string) {
-    if (!profile || state.choices[profile.id]) return;
+    if (!profile || !canPlay || state.choices[profile.id]) return;
     const newChoices = { ...state.choices, [profile.id]: choice };
     const players = Object.keys(newChoices);
     let winner: string | null = null;
@@ -724,20 +762,26 @@ function RPS({ game, state, profile, accentColor, onUpdate }: any) {
     }
     const newState = { ...state, choices: newChoices, winner };
     const supabase = createClient();
-    await supabase.from('games').update({ state: newState, status: winner?'finished':'active' }).eq('id', game.id);
+    await supabase.from('games').update({ state: newState, status: winner?'finished':'active', winner_id: winner && winner!=='draw' ? winner : null }).eq('id', game.id);
     onUpdate(newState);
   }
   const myChoice = profile && state.choices[profile.id];
   return (
     <div className="space-y-4 text-center">
-      {state.winner ? (
+      {!canPlay ? (
         <div className="p-4 rounded-2xl" style={{background:`${accentColor}22`}}>
-          <p className="font-black text-lg theme-text">{state.winner==='draw'?'Draw! 🤝':'Winner decided! 🎉'}</p>
+          <p className="font-bold theme-text">Waiting for the second player…</p>
+          <p className="text-sm mt-1" style={{color:'var(--color-text-muted)'}}>Both players must be in before anyone chooses.</p>
+        </div>
+      ) : state.winner ? (
+        <div className="p-4 rounded-2xl" style={{background:`${accentColor}22`}}>
+          <p className="font-black text-lg theme-text">{state.winner==='draw'?'Draw! 🤝':state.winner===profile?.id?'You win! 🎉':'Your friend wins! 🎉'}</p>
           <div className="mt-2 space-y-1 text-sm">
             {Object.entries(state.choices).map(([pid,c]:any)=>(
               <p key={pid} style={{color:'var(--color-text-muted)'}}>{pid===profile?.id?'You':'Them'}: {c==='rock'?'✊':c==='paper'?'✋':'✌️'} {c}</p>
             ))}
           </div>
+          <p className="text-xs mt-2" style={{color:'var(--color-text-muted)'}}>Tap Restart above for another round.</p>
         </div>
       ) : myChoice ? (
         <div className="p-4 rounded-2xl" style={{background:`${accentColor}22`}}>
@@ -762,38 +806,113 @@ function RPS({ game, state, profile, accentColor, onUpdate }: any) {
   );
 }
 
-function NumberGuess({ game, state, profile, accentColor, onUpdate }: any) {
+// Number Guess — one player sets the secret number, the other guesses it.
+// Start: two choices — "Set the number" or "Guess". Restart returns here.
+function NumberGuess({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
   const [guess, setGuess] = useState('');
-  async function makeGuess() {
-    const n = parseInt(guess);
-    if (isNaN(n)||n<1||n>100) return;
-    const isCorrect = n===state.secret;
-    const newGuesses = [...state.guesses, { player: profile?.id, value: n, correct: isCorrect, hint: n<state.secret?'Too low!':'Too high!' }];
-    const newState = { ...state, guesses: newGuesses, winner: isCorrect?profile?.id:null };
+  const [secretInput, setSecretInput] = useState('');
+  const phase = state.phase || 'playing'; // older games have no phase: play as before
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const iAmSetter = state.setterId ? state.setterId === profile?.id : false;
+  const iAmGuesser = state.guesserId ? state.guesserId === profile?.id : !state.setterId; // legacy: anyone guesses
+  const finished = !!state.winner;
+
+  async function saveState(newState: any, done: boolean) {
     const supabase = createClient();
-    await supabase.from('games').update({ state: newState, status: isCorrect?'finished':'active' }).eq('id', game.id);
+    await supabase.from('games').update({ state: newState, status: done ? 'finished' : 'active', winner_id: done ? newState.winner : null }).eq('id', game.id);
     onUpdate(newState);
+  }
+
+  async function chooseRole(role: 'write' | 'guess') {
+    if (!profile || !otherId) return;
+    const setterId = role === 'write' ? profile.id : otherId;
+    const guesserId = role === 'write' ? otherId : profile.id;
+    await saveState({ ...state, phase: 'setup', setterId, guesserId }, false);
+  }
+
+  async function setSecret() {
+    const n = parseInt(secretInput);
+    if (isNaN(n) || n < 1 || n > 100) return;
+    await saveState({ ...state, phase: 'playing', secret: n, guesses: [] }, false);
+    setSecretInput('');
+  }
+
+  async function makeGuess() {
+    if (!iAmGuesser) return;
+    const n = parseInt(guess);
+    if (isNaN(n) || n < 1 || n > 100 || finished) return;
+    const isCorrect = n === state.secret;
+    const newGuesses = [...(state.guesses || []), { player: profile?.id, value: n, correct: isCorrect, hint: n < state.secret ? 'Too low! 📉' : 'Too high! 📈' }];
+    await saveState({ ...state, guesses: newGuesses, winner: isCorrect ? profile?.id : null, phase: isCorrect ? 'finished' : 'playing' }, isCorrect);
     setGuess('');
   }
+
+  if (!canPlay) {
+    return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Waiting for the second player…</p></div>;
+  }
+
+  if (phase === 'choose') {
+    return (
+      <div className="space-y-4 text-center">
+        <p className="font-bold theme-text">How do you want to play?</p>
+        <p className="text-sm" style={{color:'var(--color-text-muted)'}}>One of you picks the secret number, the other one guesses it.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={() => chooseRole('write')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+            <span className="text-3xl">✏️</span><span className="font-black text-sm theme-text">Set the number</span>
+            <span className="text-xs" style={{color:'var(--color-text-muted)'}}>You pick it, they guess</span>
+          </button>
+          <button onClick={() => chooseRole('guess')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+            <span className="text-3xl">🔍</span><span className="font-black text-sm theme-text">Guess</span>
+            <span className="text-xs" style={{color:'var(--color-text-muted)'}}>They pick it, you guess</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'setup') {
+    if (iAmSetter) {
+      return (
+        <div className="space-y-4 text-center">
+          <p className="font-bold theme-text">Pick a secret number between 1 and 100 🔢</p>
+          <p className="text-sm" style={{color:'var(--color-text-muted)'}}>Your friend will try to guess it. Keep it secret!</p>
+          <div className="flex gap-2 max-w-xs mx-auto">
+            <input type="number" min="1" max="100" value={secretInput} onChange={e=>setSecretInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&setSecret()}
+              placeholder="1–100" className="theme-input flex-1 py-3 px-4 text-sm text-center"/>
+            <button onClick={setSecret} className="theme-btn px-5 py-3 text-sm" style={{background:accentColor}}>Set it!</button>
+          </div>
+        </div>
+      );
+    }
+    return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Your friend is picking a secret number… 🤫</p></div>;
+  }
+
   return (
     <div className="space-y-4">
-      <p className="text-sm font-bold theme-text text-center">Guess the number between 1 and 100!</p>
-      {state.winner ? (
+      <p className="text-sm font-bold theme-text text-center">
+        {finished ? 'Game over!' : iAmGuesser ? 'Guess the number between 1 and 100!' : 'Your friend is guessing your number… 👀'}
+      </p>
+      {iAmSetter && !finished && (
+        <p className="text-xs text-center font-semibold" style={{color:'var(--color-text-muted)'}}>Your secret number: {state.secret}</p>
+      )}
+      {finished ? (
         <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}>
           <p className="font-black text-lg theme-text">🎉 Correct! The number was {state.secret}!</p>
+          <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>{state.winner === profile?.id ? 'You guessed it!' : 'Your friend guessed it!'} Tap Restart above to play again.</p>
         </div>
-      ) : (
+      ) : iAmGuesser ? (
         <div className="flex gap-2">
           <input type="number" min="1" max="100" value={guess} onChange={e=>setGuess(e.target.value)} onKeyDown={e=>e.key==='Enter'&&makeGuess()}
             placeholder="1–100" className="theme-input flex-1 py-3 px-4 text-sm text-center"/>
           <button onClick={makeGuess} className="theme-btn px-5 py-3 text-sm" style={{background:accentColor}}>Guess!</button>
         </div>
-      )}
+      ) : null}
       <div className="space-y-2 max-h-48 overflow-y-auto">
-        {[...state.guesses].reverse().map((g:any,i:number)=>(
+        {[...(state.guesses || [])].reverse().map((g:any,i:number)=>(
           <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}>
             <span className="font-black text-lg" style={{color:g.correct?'#4ADE80':accentColor}}>{g.value}</span>
             <span className="text-sm" style={{color:g.correct?'#4ADE80':'var(--color-text-muted)'}}>{g.correct?'✅ Correct!':g.hint}</span>
+            <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{g.player===profile?.id?'You':'Them'}</span>
           </div>
         ))}
       </div>
@@ -801,54 +920,135 @@ function NumberGuess({ game, state, profile, accentColor, onUpdate }: any) {
   );
 }
 
-function Hangman({ game, state, profile, accentColor, onUpdate }: any) {
-  const word: string = state.word||'';
-  const guessed: string[] = state.guessed||[];
-  const wrongGuesses: string[] = state.wrongGuesses||[];
-  const maxWrong = state.maxWrong||6;
-  const isWon = word.split('').every((l:string)=>guessed.includes(l));
-  const isLost = wrongGuesses.length>=maxWrong;
+// Hangman — one player writes the word, the other guesses it.
+// Start: two choices — "Write the word" or "Guess". The word stays
+// hidden from the guesser until it is guessed or the game ends.
+function Hangman({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+  const [wordInput, setWordInput] = useState('');
+  const phase = state.phase || 'playing'; // older games have no phase: play as before
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const iAmSetter = state.setterId ? state.setterId === profile?.id : false;
+  const iAmGuesser = state.guesserId ? state.guesserId === profile?.id : !state.setterId; // legacy: anyone guesses
+  const word: string = state.word || '';
+  const guessed: string[] = state.guessed || [];
+  const wrongGuesses: string[] = state.wrongGuesses || [];
+  const maxWrong = state.maxWrong || 6;
+  const isWon = word.length > 0 && word.split('').every((l: string) => guessed.includes(l));
+  const isLost = wrongGuesses.length >= maxWrong;
+  const finished = isWon || isLost || phase === 'finished';
 
-  async function guessLetter(letter: string) {
-    if (guessed.includes(letter)||state.winner||isLost||isWon) return;
-    const isCorrect = word.includes(letter);
-    const newGuessed = isCorrect?[...guessed,letter]:guessed;
-    const newWrong = isCorrect?wrongGuesses:[...wrongGuesses,letter];
-    const won = word.split('').every((l:string)=>newGuessed.includes(l));
-    const newState = { ...state, guessed: newGuessed, wrongGuesses: newWrong, winner: won?profile?.id:null };
+  async function saveState(newState: any, done: boolean) {
     const supabase = createClient();
-    await supabase.from('games').update({ state: newState, status: (won||newWrong.length>=maxWrong)?'finished':'active' }).eq('id', game.id);
+    await supabase.from('games').update({ state: newState, status: done ? 'finished' : 'active', winner_id: done ? newState.winner : null }).eq('id', game.id);
     onUpdate(newState);
   }
 
-  const displayWord = word.split('').map((l:string)=>guessed.includes(l)?l:'_').join(' ');
-  const remaining = maxWrong-wrongGuesses.length;
+  async function chooseRole(role: 'write' | 'guess') {
+    if (!profile || !otherId) return;
+    const setterId = role === 'write' ? profile.id : otherId;
+    const guesserId = role === 'write' ? otherId : profile.id;
+    await saveState({ ...state, phase: 'setup', setterId, guesserId }, false);
+  }
+
+  async function setWord() {
+    const w = wordInput.trim().toLowerCase();
+    if (!/^[a-z]{3,15}$/.test(w)) return;
+    await saveState({ ...state, phase: 'playing', word: w, guessed: [], wrongGuesses: [] }, false);
+    setWordInput('');
+  }
+
+  async function guessLetter(letter: string) {
+    if (!iAmGuesser || guessed.includes(letter) || wrongGuesses.includes(letter) || finished || !word) return;
+    const isCorrect = word.includes(letter);
+    const newGuessed = isCorrect ? [...guessed, letter] : guessed;
+    const newWrong = isCorrect ? wrongGuesses : [...wrongGuesses, letter];
+    const won = word.split('').every((l: string) => newGuessed.includes(l));
+    const lost = newWrong.length >= maxWrong;
+    const done = won || lost;
+    await saveState({
+      ...state,
+      guessed: newGuessed,
+      wrongGuesses: newWrong,
+      winner: won ? profile?.id : lost ? state.setterId : null,
+      phase: done ? 'finished' : 'playing',
+    }, done);
+  }
+
+  if (!canPlay) {
+    return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Waiting for the second player…</p></div>;
+  }
+
+  if (phase === 'choose') {
+    return (
+      <div className="space-y-4 text-center">
+        <p className="font-bold theme-text">How do you want to play?</p>
+        <p className="text-sm" style={{color:'var(--color-text-muted)'}}>One of you writes the word, the other one guesses it letter by letter.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={() => chooseRole('write')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+            <span className="text-3xl">✏️</span><span className="font-black text-sm theme-text">Write the word</span>
+            <span className="text-xs" style={{color:'var(--color-text-muted)'}}>You choose it, they guess</span>
+          </button>
+          <button onClick={() => chooseRole('guess')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+            <span className="text-3xl">🔍</span><span className="font-black text-sm theme-text">Guess</span>
+            <span className="text-xs" style={{color:'var(--color-text-muted)'}}>They write it, you guess</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'setup') {
+    if (iAmSetter) {
+      return (
+        <div className="space-y-4 text-center">
+          <p className="font-bold theme-text">Write a word for your friend to guess 🔡</p>
+          <p className="text-sm" style={{color:'var(--color-text-muted)'}}>Letters only, 3–15 letters. Your friend will not see it until they guess it!</p>
+          <div className="flex gap-2 max-w-xs mx-auto">
+            <input type="text" value={wordInput} onChange={e=>setWordInput(e.target.value.replace(/[^a-zA-Z]/g, ''))} onKeyDown={e=>e.key==='Enter'&&setWord()}
+              placeholder="e.g. butterfly" maxLength={15} className="theme-input flex-1 py-3 px-4 text-sm text-center"/>
+            <button onClick={setWord} className="theme-btn px-5 py-3 text-sm" style={{background:accentColor}}>Set word</button>
+          </div>
+        </div>
+      );
+    }
+    return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Your friend is writing a word… 🤫</p></div>;
+  }
+
+  // Playing / finished: the guesser only ever sees blanks until the end.
+  const displayWord = word.split('').map((l: string) => (guessed.includes(l) || finished || iAmSetter) ? l : '_').join(' ');
+  const remaining = maxWrong - wrongGuesses.length;
   const alphabet = 'abcdefghijklmnopqrstuvwxyz'.split('');
 
   return (
     <div className="space-y-4 text-center">
       <div className="p-4 rounded-2xl" style={{background:'rgba(255,255,255,0.7)'}}>
-        <p className="text-xs font-bold mb-1" style={{color:'var(--color-text-muted)'}}>Wrong guesses: {wrongGuesses.length}/{maxWrong} · Remaining: {remaining}</p>
+        <p className="text-xs font-bold mb-1" style={{color:'var(--color-text-muted)'}}>
+          {iAmSetter && !finished ? `Your word · Wrong guesses: ${wrongGuesses.length}/${maxWrong}` : `Wrong guesses: ${wrongGuesses.length}/${maxWrong} · Remaining: ${remaining}`}
+        </p>
         <div className="text-2xl font-black tracking-widest theme-text my-3">{displayWord}</div>
-        {wrongGuesses.length>0 && <p className="text-sm" style={{color:'#FF6B6B'}}>❌ {wrongGuesses.join(', ')}</p>}
+        {wrongGuesses.length > 0 && <p className="text-sm" style={{color:'#FF6B6B'}}>❌ {wrongGuesses.join(', ')}</p>}
+        {!finished && iAmSetter && <p className="text-xs mt-2" style={{color:'var(--color-text-muted)'}}>You are watching — your friend is guessing 👀</p>}
       </div>
-      {isWon ? <div className="p-4 rounded-2xl font-black text-lg theme-text" style={{background:`${accentColor}22`}}>🎉 You got it! The word was "{word}"!</div>
-        : isLost ? <div className="p-4 rounded-2xl font-black text-lg" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>💀 Game over! The word was "{word}"</div>
-        : (
+      {isWon ? <div className="p-4 rounded-2xl font-black text-lg theme-text" style={{background:`${accentColor}22`}}>🎉 {state.winner === profile?.id ? 'You got it!' : 'Your friend got it!'} The word was &quot;{word}&quot;! Tap Restart above to play again.</div>
+        : isLost ? <div className="p-4 rounded-2xl font-black text-lg" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>💀 Game over! The word was &quot;{word}&quot;. Tap Restart above to try again.</div>
+        : iAmGuesser ? (
           <div className="flex flex-wrap gap-1.5 justify-center">
-            {alphabet.map(l=>(
-              <button key={l} onClick={()=>guessLetter(l)} disabled={guessed.includes(l)||wrongGuesses.includes(l)}
+            {alphabet.map(l => (
+              <button key={l} onClick={() => guessLetter(l)} disabled={guessed.includes(l) || wrongGuesses.includes(l)}
                 className="w-9 h-9 rounded-xl text-sm font-bold transition-all hover:scale-110"
                 style={{background:guessed.includes(l)?`${accentColor}44`:wrongGuesses.includes(l)?'rgba(255,107,107,0.2)':'rgba(255,255,255,0.8)',color:guessed.includes(l)?accentColor:wrongGuesses.includes(l)?'#FF6B6B':'var(--color-text)',border:`1px solid ${accentColor}33`,opacity:guessed.includes(l)||wrongGuesses.includes(l)?0.5:1}}>
                 {l.toUpperCase()}
               </button>
             ))}
           </div>
+        ) : (
+          <p className="text-sm font-bold theme-text">Waiting for your friend to guess…</p>
         )
       }
     </div>
   );
 }
+
 
 function Loading() {
   return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0,1,2].map(i=><div key={i} style={{width:10,height:10,borderRadius:'50%',background:'var(--color-accent)',animation:'float 1s ease-in-out infinite',animationDelay:`${i*0.2}s`}}/>)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
