@@ -2,6 +2,8 @@
 
 > A cute, cozy and private digital hangout for friends.
 
+> 🌐 **Live demo:** https://palsy-app.vercel.app
+
 ## ✨ Features
 
 - 🎨 Blue & Pink themes (user-selectable, persisted)
@@ -29,7 +31,7 @@ npm install
 ### 2. Set up Supabase
 1. Create a project at [supabase.com](https://supabase.com)
 2. Go to your project → SQL Editor
-3. Run the migration: `supabase/migrations/001_initial.sql`
+3. Run the migrations in order: `supabase/migrations/001_initial.sql`, then `002`–`005` and `007`–`011`
 4. Set up Storage bucket named `avatars` (public)
 5. Set up Storage bucket named `media` (authenticated)
 
@@ -70,7 +72,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## 🗄️ Database
 
-Run `supabase/migrations/001_initial.sql` in your Supabase SQL Editor.
+Run the migrations in `supabase/migrations/` in order in your Supabase SQL Editor (001, then 002–005 and 007–011). The full consolidated schema is also kept at `supabase/palsy-supabase-schema-2026-11-10.sql` for reference.
 
 Tables: `profiles`, `friend_requests`, `friendships`, `rooms`, `room_members`, `messages`, `message_reactions`, `notifications`, `games`, `game_players`
 
