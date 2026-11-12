@@ -78,6 +78,8 @@ export interface Message {
   updated_at: string;
   sender?: Profile;
   reactions?: MessageReaction[];
+  // Local-only: set when a send fails so the bubble can offer a retry.
+  failed?: boolean;
 }
 
 export interface MessageReaction {
