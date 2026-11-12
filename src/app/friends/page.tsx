@@ -98,10 +98,13 @@ function FriendsContent() {
 
   useEffect(() => { if (tab==='search') loadSuggestions(); }, [tab, loadSuggestions]);
 
-  // PostgREST logic-tree characters ( , ( ) ) and LIKE wildcards break the
-  // search filter and used to fail silently, showing nothing. Strip them.
+  // PostgREST logic-tree characters ( , ( ) ) break the search filter and
+  // used to fail silently, showing nothing. Strip those — but LIKE wildcards
+  // (% and _) must be ESCAPED, not stripped: usernames may contain
+  // underscores, and stripping "_" made "tester_new" unfindable.
   function cleanTerm(q: string) {
-    return q.replace(/[,()%_\\]/g, ' ').replace(/\s+/g, ' ').trim();
+    return q.replace(/[,()]/g, ' ').replace(/\s+/g, ' ').trim()
+      .replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
   }
 
   const runSearch = useCallback(async (raw: string) => {
