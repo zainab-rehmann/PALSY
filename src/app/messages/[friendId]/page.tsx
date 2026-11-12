@@ -9,6 +9,7 @@ import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image a
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
+import { isFreshOnline, presenceLabel } from '@/lib/presence';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉'];
 
@@ -27,6 +28,7 @@ export default function DMPage() {
   const [reactionMsg, setReactionMsg] = useState<string|null>(null);
   const [editing, setEditing] = useState<Message|null>(null);
   const [friendTyping, setFriendTyping] = useState(false);
+  const [friendInChat, setFriendInChat] = useState(false);
   const typingChannelRef = useRef<any>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>|null>(null);
   const lastTypingSentRef = useRef(0);
@@ -40,8 +42,9 @@ export default function DMPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const supabase = createClient();
+    let liveChannels: any[] = [];
     (async () => {
-      const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.replace('/login'); return; }
       const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single();
@@ -100,8 +103,28 @@ export default function DMPage() {
         })
         .subscribe();
       typingChannelRef.current = tChan;
-      return () => { supabase.removeChannel(channel); supabase.removeChannel(tChan); };
+
+      // Live presence: refresh the friend's online / last-seen the moment
+      // it changes, and learn whether they currently have this chat open.
+      const profileChannel = supabase.channel(`dm-profile-${friendId}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${friendId}` }, (payload) => {
+          const upd = payload.new as Profile;
+          setFriend(prev => prev ? { ...prev, is_online: upd.is_online, last_seen: upd.last_seen, display_name: upd.display_name } : prev);
+        })
+        .subscribe();
+      const presenceChannel = supabase.channel(`presence-dm-${[user.id, friendId].sort().join('-')}`, { config: { presence: { key: user.id } } });
+      presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          const states = presenceChannel.presenceState();
+          const others = Object.values(states).flat() as any[];
+          setFriendInChat(others.some(o => o.user_id === friendId && o.in_chat));
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') await presenceChannel.track({ user_id: user.id, in_chat: true });
+        });
+      liveChannels = [channel, tChan, profileChannel, presenceChannel];
     })();
+    return () => { liveChannels.forEach(c => { try { supabase.removeChannel(c); } catch {} }); };
   }, [router, friendId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -266,10 +289,10 @@ export default function DMPage() {
         <Link href="/messages" className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><ArrowLeft size={18} style={{color:'var(--color-accent)'}}/></Link>
         {friend && (
           <>
-            <div className="relative"><Avatar profile={friend} size={38}/><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{background:friend.is_online?'#4ADE80':'#9CA3AF'}}/></div>
+            <div className="relative"><Avatar profile={friend} size={38}/><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{background:isFreshOnline(friend)?'#4ADE80':'#9CA3AF'}}/></div>
             <div>
               <p className="font-black text-sm theme-text">{friend.display_name||friend.username}</p>
-              <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{friend.is_online?'🟢 Online':'⚫ Offline'}</p>
+              <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{friendTyping ? 'typing…' : friendInChat ? 'In this chat 💬' : isFreshOnline(friend) ? '🟢 Online' : presenceLabel(friend)}</p>
             </div>
           </>
         )}
