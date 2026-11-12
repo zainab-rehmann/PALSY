@@ -1404,8 +1404,11 @@ function Hangman({ game, state, profile, accentColor, canPlay, players, onUpdate
     return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Your friend is writing a word… 🤫</p></div>;
   }
 
-  // Playing / finished: the guesser only ever sees blanks until the end.
-  const displayWord = word.split('').map((l: string) => (guessed.includes(l) || finished || iAmSetter) ? l : '_').join(' ');
+  // Playing / finished: everyone sees the SAME progress — letters are
+  // revealed only when the guesser gets them right. The setter watches
+  // this exact view live (their own word is shown in small text below).
+  // The full word is revealed to all when the game ends.
+  const displayWord = word.split('').map((l: string) => (guessed.includes(l) || finished) ? l : '_').join(' ');
   const remaining = maxWrong - wrongGuesses.length;
   const alphabet = 'abcdefghijklmnopqrstuvwxyz'.split('');
 
@@ -1413,11 +1416,12 @@ function Hangman({ game, state, profile, accentColor, canPlay, players, onUpdate
     <div className="space-y-4 text-center">
       <div className="p-4 rounded-2xl" style={{background:'rgba(255,255,255,0.7)'}}>
         <p className="text-xs font-bold mb-1" style={{color:'var(--color-text-muted)'}}>
-          {iAmSetter && !finished ? `Your word · Wrong guesses: ${wrongGuesses.length}/${maxWrong}` : `Wrong guesses: ${wrongGuesses.length}/${maxWrong} · Remaining: ${remaining}`}
+          {`Wrong guesses: ${wrongGuesses.length}/${maxWrong} · Remaining: ${remaining}`}
         </p>
         <div className="text-2xl font-black tracking-widest theme-text my-3">{displayWord}</div>
         {wrongGuesses.length > 0 && <p className="text-sm" style={{color:'#FF6B6B'}}>❌ {wrongGuesses.join(', ')}</p>}
-        {!finished && iAmSetter && <p className="text-xs mt-2" style={{color:'var(--color-text-muted)'}}>You are watching — your friend is guessing 👀</p>}
+        {!finished && iAmSetter && <p className="text-xs mt-2 font-semibold" style={{color:'var(--color-text-muted)'}}>Your word: {word}</p>}
+        {!finished && iAmSetter && <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>You are watching — your friend is guessing 👀</p>}
       </div>
       {isWon ? <div className="p-4 rounded-2xl font-black text-lg theme-text" style={{background:`${accentColor}22`}}>🎉 {state.winner === profile?.id ? 'You got it!' : 'Your friend got it!'} The word was &quot;{word}&quot;! Tap Restart above to play again.</div>
         : isLost ? <div className="p-4 rounded-2xl font-black text-lg" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>💀 Game over! The word was &quot;{word}&quot;. Tap Restart above to try again.</div>
