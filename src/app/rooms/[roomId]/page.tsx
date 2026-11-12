@@ -7,7 +7,7 @@ import type { Profile, Room, RoomMember, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, Hash, Lock,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -15,6 +15,8 @@ import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName } from '@/lib/chatTools';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import EntryCodePrompt from '@/components/EntryCodePrompt';
+import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
 
 const PRESETS: Record<string,{bg:string;accent:string;emoji:string}> = {
   'cloudy-blue':{bg:'#DCEBFF',accent:'#7CA8E8',emoji:'☁️'},
@@ -67,6 +69,15 @@ export default function RoomPage() {
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'clear' | 'deleteSelected' | null>(null);
   const [sendError, setSendError] = useState('');
+  // Entry-code gate (non-members of coded rooms) + settings (owner)
+  const [needsCode, setNeedsCode] = useState(false);
+  const [gateError, setGateError] = useState('');
+  const [gateBusy, setGateBusy] = useState(false);
+  const [codeInput, setCodeInput] = useState('');
+  const [codeMsg, setCodeMsg] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+  const [savedCode, setSavedCode] = useState('');
+  const [codeCopied, setCodeCopied] = useState(false);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -101,7 +112,14 @@ export default function RoomPage() {
       .subscribe();
     typingChannelRef.current = tChan;
     const myMembership = (mems||[]).find(m=>m.user_id===user.id);
-    if (!myMembership) { router.replace('/rooms'); return; }
+    if (!myMembership) {
+      if ((rm as Room).has_entry_code) {
+        setNeedsCode(true);
+        setLoading(false);
+        return;
+      }
+      router.replace('/rooms'); return;
+    }
     setMyRole(myMembership.role);
 
     const { data: msgs } = await supabase.from('messages')
@@ -344,6 +362,62 @@ export default function RoomPage() {
     if (!error) setMyMuted(next);
   }
 
+  // Entry-code gate: verify (server-side) then join as a member.
+  async function submitGateCode(code: string) {
+    if (!profile || !room) return;
+    setGateBusy(true); setGateError('');
+    const supabase = createClient();
+    const { data: ok, error } = await supabase.rpc('verify_room_entry_code', { p_room_id: roomId, p_code: normalizeEntryCode(code) });
+    if (error || !ok) {
+      setGateError("That code doesn't match — try again ♡");
+      setGateBusy(false);
+      return;
+    }
+    const { data: existing } = await supabase.from('room_members').select('id').eq('room_id', roomId).eq('user_id', profile.id).single();
+    if (!existing) {
+      await supabase.from('room_members').insert({ room_id: roomId, user_id: profile.id, role: 'member' });
+    }
+    setNeedsCode(false);
+    setGateBusy(false);
+    setLoading(true);
+    load();
+  }
+
+  // Owner settings: set / change / remove the entry code.
+  async function saveEntryCode() {
+    if (!room || myRole !== 'owner') return;
+    const code = normalizeEntryCode(codeInput);
+    if (!isValidEntryCode(code)) { setCodeMsg('Entry code must be 4–8 letters or digits.'); return; }
+    setCodeBusy(true); setCodeMsg('');
+    const supabase = createClient();
+    const { error } = await supabase.rpc('set_room_entry_code', { p_room_id: roomId, p_code: code });
+    setCodeBusy(false);
+    if (error) { setCodeMsg('Could not save that code. Please try again.'); return; }
+    setRoom({ ...room, has_entry_code: true });
+    setSavedCode(code);
+    setCodeInput('');
+    setCodeMsg('Entry code saved ♡ Share it with friends you want in this room.');
+  }
+
+  async function removeEntryCode() {
+    if (!room || myRole !== 'owner') return;
+    setCodeBusy(true); setCodeMsg('');
+    const supabase = createClient();
+    const { error } = await supabase.rpc('remove_room_entry_code', { p_room_id: roomId });
+    setCodeBusy(false);
+    if (error) { setCodeMsg('Could not remove the code. Please try again.'); return; }
+    setRoom({ ...room, has_entry_code: false });
+    setSavedCode('');
+    setCodeMsg('Entry code removed — this room is open to anyone with the invite code again.');
+  }
+
+  function copyEntryCode() {
+    if (!savedCode) return;
+    navigator.clipboard.writeText(savedCode);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  }
+
   function broadcastTyping() {
     const now = Date.now();
     if (now - lastTypingSentRef.current < 2000 || !profile) return;
@@ -435,6 +509,22 @@ export default function RoomPage() {
   const preset = room.preset ? PRESETS[room.preset] : null;
   const accentColor = preset?.accent || room.accent_color || 'var(--color-accent)';
 
+  if (needsCode) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 theme-bg" style={{background:preset?.bg||'var(--color-bg)'}}>
+        <EntryCodePrompt
+          roomName={room.name}
+          accentColor={accentColor}
+          error={gateError}
+          busy={gateBusy}
+          onSubmit={submitGateCode}
+          onCancel={()=>router.replace('/rooms')}
+          submitLabel="Unlock & Join ♡"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen" style={{background:preset?.bg||'var(--color-bg)'}}>
       {/* Header */}
@@ -452,7 +542,7 @@ export default function RoomPage() {
 ? <img src={room.avatar_url} alt={room.name} className="w-9 h-9 rounded-xl object-cover"/>
 : <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{background:'rgba(255,255,255,0.7)'}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
         <div className="flex-1 min-w-0">
-          <p className="font-black text-sm theme-text truncate">{room.name}</p>
+          <p className="font-black text-sm theme-text truncate flex items-center gap-1.5">{room.name}{room.has_entry_code && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{background:`${accentColor}22`,color:accentColor}}><KeyRound size={10}/>Entry code</span>}</p>
           <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{members.length} members · {members.filter(m=>isFreshOnline((m.profile as Profile)||null)).length} online</p>
         </div>
         {/* Share */}
@@ -688,6 +778,47 @@ export default function RoomPage() {
                 </button>
               </div>
             </div>
+            {myRole==='owner' && (
+              <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black theme-text flex-1 flex items-center gap-2"><KeyRound size={16}/> Entry Code</h3>
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full" style={{background: room.has_entry_code ? `${accentColor}22` : 'var(--color-secondary)', color: room.has_entry_code ? accentColor : 'var(--color-text-muted)'}}>
+                    {room.has_entry_code ? '🔒 On' : 'Off'}
+                  </span>
+                </div>
+                <p className="text-xs" style={{color:'var(--color-text-muted)'}}>
+                  Optional extra lock, separate from the invite code below. When it is on, anyone who is not already a member must type this code before they can enter. Members always come straight in — setting or changing it never locks them out.
+                </p>
+                <div className="flex gap-2">
+                  <input type="text" placeholder={room.has_entry_code ? 'New code (4–8 letters/digits)' : 'New code (4–8 letters/digits)'}
+                    value={codeInput} onChange={e=>setCodeInput(e.target.value.toUpperCase())}
+                    className="theme-input flex-1 py-2.5 px-3 text-sm font-mono tracking-widest uppercase" maxLength={8}/>
+                  <button onClick={()=>setCodeInput(generateEntryCode())} className="px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-text)'}} title="Generate a random code">
+                    <Dices size={14}/>Random
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={saveEntryCode} disabled={codeBusy || !codeInput.trim()} className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white" style={{background:accentColor,opacity: codeBusy || !codeInput.trim() ? 0.6 : 1}}>
+                    {room.has_entry_code ? 'Change Code' : 'Set Code'}
+                  </button>
+                  {room.has_entry_code && (
+                    <button onClick={removeEntryCode} disabled={codeBusy} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+                      Remove Code
+                    </button>
+                  )}
+                </div>
+                {savedCode && (
+                  <div className="flex items-center gap-2 p-3 rounded-xl font-mono text-sm" style={{background:'var(--color-secondary)'}}>
+                    <span className="flex-1 font-bold tracking-widest">{savedCode}</span>
+                    <button onClick={copyEntryCode} className="p-1.5 rounded-lg" style={{background:accentColor,color:'white'}}>
+                      {codeCopied?<Check size={14}/>:<Copy size={14}/>}
+                    </button>
+                  </div>
+                )}
+                {codeMsg && <p className="text-xs font-bold" style={{color:'var(--color-text-muted)'}}>{codeMsg}</p>}
+                <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Only you can change or remove it. If you forget it, just set a new one — the old code stops working right away.</p>
+              </div>
+            )}
             <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
               <h3 className="font-black theme-text">Room Info</h3>
               <div>
