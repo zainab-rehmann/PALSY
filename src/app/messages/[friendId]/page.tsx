@@ -5,12 +5,12 @@ import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
-import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName } from '@/lib/chatTools';
+import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
 import ConfirmDialog from '@/components/ConfirmDialog';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
@@ -51,6 +51,18 @@ export default function DMPage() {
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'clear' | 'deleteSelected' | null>(null);
   const [sendError, setSendError] = useState('');
+  // Reply / pin / star
+  const [replyTo, setReplyTo] = useState<Message|null>(null);
+  const [quotedMap, setQuotedMap] = useState<Record<string, Message | null>>({});
+  const quotedFetchedRef = useRef<Set<string>>(new Set());
+  const [pinnedList, setPinnedList] = useState<Message[]>([]);
+  const [pinIndex, setPinIndex] = useState(0);
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
+  const [showStarred, setShowStarred] = useState(false);
+  const [starredMessages, setStarredMessages] = useState<Message[]>([]);
+  const [highlightId, setHighlightId] = useState<string|null>(null);
+  const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [jumpNote, setJumpNote] = useState('');
 
   useEffect(() => {
     const supabase = createClient();
@@ -106,7 +118,7 @@ export default function DMPage() {
           if (upd.is_deleted) {
             setMessages(m=>m.filter(x=>x.id!==upd.id));
           } else {
-            setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, delivered_at: upd.delivered_at, read_at: upd.read_at, content: upd.content, edited_at: upd.edited_at } : x));
+            setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, delivered_at: upd.delivered_at, read_at: upd.read_at, content: upd.content, edited_at: upd.edited_at, is_pinned: upd.is_pinned, pinned_at: upd.pinned_at, reply_to_id: upd.reply_to_id } : x));
           }
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
@@ -173,6 +185,55 @@ export default function DMPage() {
     return () => clearInterval(t);
   }, [friendId]);
 
+  // Reply quotes + pinned bar: refresh whenever the loaded messages change
+  // (first load, realtime arrivals, pin updates from either side).
+  useEffect(() => {
+    if (!profile) return;
+    const supabase = createClient();
+    const loaded = new Set(messages.map(m=>m.id));
+    const missing = [...new Set(messages.map(m=>m.reply_to_id).filter((id): id is string => !!id && !loaded.has(id) && !quotedFetchedRef.current.has(id)))];
+    if (missing.length) {
+      missing.forEach(id=>quotedFetchedRef.current.add(id));
+      supabase.from('messages').select('*,sender:profiles!sender_id(*)').in('id', missing).then(({ data }) => {
+        const found = new Map((data||[]).map((m:any)=>[m.id, m as Message]));
+        setQuotedMap(prev => { const next = { ...prev }; missing.forEach(id => { next[id] = found.get(id) ?? null; }); return next; });
+      });
+    }
+    supabase.from('messages').select('*,sender:profiles!sender_id(*)')
+      .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
+      .eq('is_pinned', true).order('pinned_at', { ascending: false })
+      .then(({ data }) => { setPinnedList((data||[]) as Message[]); setPinIndex(0); });
+  }, [messages, profile, friendId]);
+
+  // My own stars (private — only ever my own rows are readable).
+  useEffect(() => {
+    if (!profile) return;
+    const supabase = createClient();
+    supabase.from('message_stars').select('message_id').eq('user_id', profile.id).then(({ data }) => {
+      setStarredIds(new Set((data||[]).map((r:any)=>r.message_id)));
+    });
+  }, [profile]);
+
+  // Escape closes the message menu.
+  useEffect(() => {
+    if (!reactionMsg) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setReactionMsg(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [reactionMsg]);
+
+  // Jump highlight: scroll to the target message once it is in the DOM.
+  useEffect(() => {
+    if (!highlightId) return;
+    let tries = 0;
+    const t = setInterval(() => {
+      const el = msgRefs.current[highlightId];
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); clearInterval(t); }
+      if (++tries > 12) clearInterval(t);
+    }, 120);
+    return () => clearInterval(t);
+  }, [highlightId, messages]);
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !profile) return;
@@ -195,12 +256,14 @@ export default function DMPage() {
         content: file.name,
         media_url: publicUrl,
         type,
+        reply_to_id: replyTo?.id ?? null,
       });
       if (insertErr) setSendError("Couldn't send that file. Please try again.");
     } else {
       setSendError("Upload failed. Please try again.");
     }
     setUploading(false);
+    setReplyTo(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -231,7 +294,9 @@ export default function DMPage() {
             content: 'Voice message',
             media_url: publicUrl,
             type: 'audio',
+            reply_to_id: replyTo?.id ?? null,
           });
+          setReplyTo(null);
           if (insertErr) setSendError("Couldn't send that voice message. Please try again.");
         }
         setUploading(false);
@@ -290,14 +355,16 @@ export default function DMPage() {
       id: tempId, room_id: null, sender_id: profile.id, receiver_id: friendId,
       content: text, media_url: null, delivered_at: null, read_at: null,
       edited_at: null, type: 'text', is_deleted: false, reply_to: null,
+      reply_to_id: replyTo?.id ?? null, is_pinned: false, pinned_at: null,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       sender: profile, reactions: [],
     };
     setMessages(m=>[...m, temp]);
     setInput('');
+    setReplyTo(null);
     const { data, error } = await supabase.from('messages').insert({
       sender_id: profile.id, receiver_id: friendId,
-      content: text, type: 'text'
+      content: text, type: 'text', reply_to_id: replyTo?.id ?? null
     }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
@@ -316,7 +383,7 @@ export default function DMPage() {
     const supabase = createClient();
     const { data, error } = await supabase.from('messages').insert({
       sender_id: profile.id, receiver_id: friendId,
-      content: msg.content, type: 'text'
+      content: msg.content, type: 'text', reply_to_id: msg.reply_to_id ?? null
     }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
@@ -325,24 +392,29 @@ export default function DMPage() {
     }
   }
 
+  // One older page of history (oldest-first). Shared by the Load-older
+  // button and by jump-to-message, which pages until it finds its target.
+  async function fetchOlderPage(before: string): Promise<Message[]> {
+    const supabase = createClient();
+    const { data } = await supabase.from('messages')
+      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+      .or(`and(sender_id.eq.${profile!.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile!.id})`)
+      .eq('is_deleted', false)
+      .lt('created_at', before)
+      .order('created_at', { ascending: false })
+      .limit(CHAT_PAGE_SIZE);
+    return [...(data||[])].reverse() as Message[];
+  }
+
   // Load an older page of history, keeping the scroll position steady.
   async function loadOlder() {
     if (loadingOlder || !messages.length || !profile) return;
     setLoadingOlder(true);
-    const supabase = createClient();
-    const oldest = messages[0].created_at;
     const el = listRef.current;
     const prevHeight = el ? el.scrollHeight : 0;
-    const { data } = await supabase.from('messages')
-      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
-      .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
-      .eq('is_deleted', false)
-      .lt('created_at', oldest)
-      .order('created_at', { ascending: false })
-      .limit(CHAT_PAGE_SIZE);
-    const older = [...(data||[])].reverse();
+    const older = await fetchOlderPage(messages[0].created_at);
     setMessages(m=>[...older, ...m]);
-    setHasMore((data||[]).length === CHAT_PAGE_SIZE);
+    setHasMore(older.length === CHAT_PAGE_SIZE);
     setLoadingOlder(false);
     requestAnimationFrame(() => {
       if (el) el.scrollTop = el.scrollHeight - prevHeight;
@@ -367,8 +439,20 @@ export default function DMPage() {
       all.push(...(data as Message[]));
       if (data.length < PAGE) break;
     }
+    // Quoted originals, so replies keep their context in the export.
+    const replyIds = [...new Set(all.map(m=>m.reply_to_id).filter(Boolean))] as string[];
+    const quoteById = new Map<string, Message>();
+    if (replyIds.length) {
+      const { data: qd } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').in('id', replyIds);
+      (qd||[]).forEach((q:any)=>quoteById.set(q.id, q as Message));
+    }
     const title = `Chat with ${friend?.display_name || friend?.username || 'friend'}`;
-    const text = buildTranscript(title, all, (m) => senderName(m, m.sender_id === profile.id ? 'You' : 'Friend'));
+    const text = buildTranscript(title, all, (m) => senderName(m, m.sender_id === profile.id ? 'You' : 'Friend'), (m) => {
+      if (!m.reply_to_id) return null;
+      const q = quoteById.get(m.reply_to_id);
+      if (!q) return '↩ Replying to a deleted message';
+      return `↩ Replying to ${senderName(q, q.sender_id === profile.id ? 'You' : 'Friend')}: ${quoteSnippet(q)}`;
+    });
     const stamp = new Date().toISOString().slice(0, 10);
     downloadTextFile(`palsy-chat-${friend?.username || 'friend'}-${stamp}.txt`, text);
   }
@@ -380,6 +464,8 @@ export default function DMPage() {
       .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`);
     setMessages([]);
     setHasMore(false);
+    setPinnedList([]);
+    setReplyTo(null);
     setConfirmAction(null);
   }
 
@@ -389,6 +475,7 @@ export default function DMPage() {
     const ids = [...selectedIds];
     await supabase.from('messages').delete().in('id', ids);
     setMessages(m=>m.filter(x=>!selectedIds.has(x.id)));
+    setReplyTo(null);
     setSelectedIds(new Set());
     setSelectMode(false);
     setConfirmAction(null);
@@ -452,8 +539,88 @@ async function addReaction(msgId: string, emoji: string) {
     setEditing(msg);
     setInput(msg.content||'');
     setReactionMsg(null);
+    setReplyTo(null);
     setTimeout(()=>inputRef.current?.focus(), 50);
   }
+
+  function startReply(msg: Message) {
+    setReplyTo(msg);
+    setEditing(null);
+    setReactionMsg(null);
+    setTimeout(()=>inputRef.current?.focus(), 50);
+  }
+
+  async function togglePin(msg: Message) {
+    setReactionMsg(null);
+    const supabase = createClient();
+    const { error } = await supabase.rpc('set_message_pinned', { p_message_id: msg.id, p_pin: !msg.is_pinned });
+    if (error) { setSendError("Couldn't change that pin. Please try again."); return; }
+    setMessages(m=>m.map(x=>x.id===msg.id ? { ...x, is_pinned: !msg.is_pinned, pinned_at: !msg.is_pinned ? new Date().toISOString() : null } : x));
+  }
+
+  async function toggleStar(msg: Message) {
+    setReactionMsg(null);
+    if (!profile) return;
+    const supabase = createClient();
+    if (starredIds.has(msg.id)) {
+      await supabase.from('message_stars').delete().eq('user_id', profile.id).eq('message_id', msg.id);
+      setStarredIds(prev => { const n = new Set(prev); n.delete(msg.id); return n; });
+    } else {
+      await supabase.from('message_stars').insert({ user_id: profile.id, message_id: msg.id });
+      setStarredIds(prev => new Set(prev).add(msg.id));
+    }
+  }
+
+  async function openStarred() {
+    setShowChatMenu(false);
+    if (!profile) return;
+    const supabase = createClient();
+    const { data: rows } = await supabase.from('message_stars').select('message_id').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(200);
+    const ids = (rows||[]).map((r:any)=>r.message_id);
+    if (!ids.length) { setStarredMessages([]); setShowStarred(true); return; }
+    const { data } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').in('id', ids).order('created_at', { ascending: false });
+    const mine = (data||[]).filter((m:any)=> (m.sender_id===profile.id&&m.receiver_id===friendId)||(m.sender_id===friendId&&m.receiver_id===profile.id));
+    setStarredMessages(mine as Message[]);
+    setShowStarred(true);
+  }
+
+  // Jump to a message (from a quote, the pinned bar, or Starred): load
+  // older pages until it is on screen, then scroll + highlight it.
+  async function jumpToMessage(id: string) {
+    setJumpNote('');
+    if (!messages.some(m=>m.id===id) && messages.length) {
+      let cursor = messages[0].created_at;
+      for (let i = 0; i < 10; i++) {
+        const batch = await fetchOlderPage(cursor);
+        if (!batch.length) break;
+        setMessages(m=>[...batch, ...m]);
+        setHasMore(batch.length === CHAT_PAGE_SIZE);
+        if (batch.some(m=>m.id===id)) break;
+        cursor = batch[0].created_at;
+        if (batch.length < CHAT_PAGE_SIZE) break;
+        await new Promise(r=>setTimeout(r, 60));
+      }
+    }
+    await new Promise(r=>setTimeout(r, 120));
+    setHighlightId(id);
+    setTimeout(()=>setHighlightId(h=>h===id?null:h), 2400);
+    setTimeout(()=>{
+      if (!msgRefs.current[id]) setJumpNote("Couldn't find that message — it may have been deleted.");
+    }, 1800);
+  }
+
+  // The quoted original for a reply: from loaded messages, else the
+  // fetched cache (null = deleted or gone, undefined = still loading).
+  function quotedOf(msg: Message): Message | null | undefined {
+    if (!msg.reply_to_id) return undefined;
+    const inList = messages.find(m=>m.id===msg.reply_to_id);
+    if (inList) return inList;
+    if (msg.reply_to_id in quotedMap) return quotedMap[msg.reply_to_id];
+    return undefined;
+  }
+
+  const pinnedCurrent = pinnedList.length ? pinnedList[pinIndex % pinnedList.length] : null;
+
 
   if (loading) return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0,1,2].map(i=><div key={i} style={{width:10,height:10,borderRadius:'50%',background:'var(--color-accent)',animation:'float 1s ease-in-out infinite',animationDelay:`${i*0.2}s`}}/>)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
 
@@ -486,6 +653,7 @@ async function addReaction(msgId: string, emoji: string) {
               <div className="fixed inset-0 z-30" onClick={()=>setShowChatMenu(false)}/>
               <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl p-2 z-40 space-y-1" style={{background:'var(--color-surface)',border:'1px solid var(--color-border)',boxShadow:'0 8px 30px rgba(0,0,0,0.12)'}}>
                 <button onClick={exportChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:'var(--color-accent)'}}/> Export chat</button>
+                <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:'var(--color-accent)'}}/> Starred messages</button>
                 <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:'var(--color-accent)'}}/> Select messages</button>
                 <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'#FF6B6B'}}><Trash2 size={16}/> Clear chat</button>
               </div>
@@ -496,6 +664,16 @@ async function addReaction(msgId: string, emoji: string) {
       )}
       {sendError && (
         <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,107,107,0.12)',color:'#FF6B6B'}}>{sendError} <button onClick={()=>setSendError('')} className="underline ml-1">Dismiss</button></div>
+      )}
+      {jumpNote && (
+        <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)'}}>{jumpNote} <button onClick={()=>setJumpNote('')} className="underline ml-1">Dismiss</button></div>
+      )}
+      {pinnedCurrent && (
+        <button onClick={()=>{ jumpToMessage(pinnedCurrent.id); setPinIndex(i=>i+1); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'var(--color-secondary)',borderBottom:'1px solid var(--color-border)'}}>
+          <Pin size={14} style={{color:'var(--color-accent)'}} className="flex-shrink-0"/>
+          <span className="text-xs font-bold truncate" style={{color:'var(--color-text)'}}>{senderName(pinnedCurrent, pinnedCurrent.sender_id === profile?.id ? 'You' : 'Friend')}: <span className="font-normal" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(pinnedCurrent)}</span></span>
+          {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:'var(--color-accent)'}}>{pinnedList.length} pinned · tap to cycle</span>}
+        </button>
       )}
 
       {/* Messages */}
@@ -517,7 +695,7 @@ async function addReaction(msgId: string, emoji: string) {
           if (msg.is_deleted) return (
             <Fragment key={msg.id}>
               {divider}
-              <div className={`flex ${mine?'justify-end':'justify-start'}`}>
+              <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex ${mine?'justify-end':'justify-start'}`} style={highlightId===msg.id?{outline:'2px solid var(--color-accent)',outlineOffset:2,borderRadius:16}:undefined}>
                 <span className="text-xs italic px-3 py-1.5 rounded-2xl" style={{color:'var(--color-text-muted)',background:'var(--color-secondary)'}}>Message deleted</span>
               </div>
             </Fragment>
@@ -526,7 +704,7 @@ async function addReaction(msgId: string, emoji: string) {
           return (
             <Fragment key={msg.id}>
               {divider}
-            <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'} ${selected?'rounded-2xl':''}`} style={selected?{background:'var(--color-secondary)'}:undefined} onClick={selectMode ? ()=>toggleSelect(msg.id) : undefined}>
+            <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'} ${selected?'rounded-2xl':''}`} style={highlightId===msg.id?{background:'var(--color-secondary)',borderRadius:16,outline:'2px solid var(--color-accent)',outlineOffset:2}:selected?{background:'var(--color-secondary)'}:undefined} onClick={selectMode ? ()=>toggleSelect(msg.id) : undefined}>
               {selectMode && (
                 <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?'var(--color-accent)':'var(--color-border)',background:selected?'var(--color-accent)':'transparent',color:'#fff'}}>
                   {selected && <Check size={14}/>}
@@ -545,6 +723,24 @@ async function addReaction(msgId: string, emoji: string) {
                   onTouchStart={()=>{if(!selectMode) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}
                   onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}
                 >
+                  {msg.reply_to_id && (() => {
+                    const q = quotedOf(msg);
+                    const gone = q === null || (q !== undefined && q !== null && q.is_deleted);
+                    return (
+                      <button onClick={(e)=>{ e.stopPropagation(); jumpToMessage(msg.reply_to_id!); }} className="block w-full text-left mb-1.5 px-2.5 py-1.5 rounded-xl" style={{background:'rgba(0,0,0,0.06)',borderLeft:'3px solid var(--color-accent)'}}>
+                        {gone ? (
+                          <span className="text-xs italic" style={{color:'var(--color-text-muted)'}}>Message deleted</span>
+                        ) : q ? (
+                          <>
+                            <span className="block text-xs font-bold" style={{color:'var(--color-accent)'}}>↩ {senderName(q, q.sender_id === profile?.id ? 'You' : 'Friend')}</span>
+                            <span className="block text-xs truncate" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(q)}</span>
+                          </>
+                        ) : (
+                          <span className="text-xs" style={{color:'var(--color-text-muted)'}}>…</span>
+                        )}
+                      </button>
+                    );
+                  })()}
                   {/* Media Content */}
                   {msg.type === 'image' && msg.media_url && (
                     <div className="mb-2 rounded-xl overflow-hidden max-w-xs">
@@ -569,10 +765,17 @@ async function addReaction(msgId: string, emoji: string) {
                   {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.content}
                   {/* Reaction picker on hover */}
                   {reactionMsg===msg.id && (
-                    <div className="absolute bottom-full mb-1 left-0 flex flex-col gap-1 p-2 rounded-2xl z-10" style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
+                    <>
+                    <div className="fixed inset-0 z-[5]" onClick={()=>setReactionMsg(null)}/>
+                    <div className={`absolute bottom-full mb-1 ${mine?'right-0':'left-0'} flex flex-col gap-1 p-2 rounded-2xl z-10`} style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
                       <div className="flex gap-1" style={{flexWrap:'wrap',maxWidth:320}}>
                       {EMOJI_LIST.map(e=><button key={e} onClick={()=>addReaction(msg.id,e)} className="text-lg hover:scale-125 transition-transform">{e}</button>)}
                       <button onClick={()=>setReactionMsg(null)} className="text-xs p-1"><X size={12}/></button>
+                      </div>
+                      <div className="flex gap-1 pt-1" style={{borderTop:'1px solid var(--color-border)'}}>
+                        <button onClick={()=>startReply(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}><Reply size={12}/> Reply</button>
+                        <button onClick={()=>togglePin(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:msg.is_pinned?'var(--color-accent)':'var(--color-secondary)',color:msg.is_pinned?'#fff':'var(--color-text)'}}><Pin size={12}/> {msg.is_pinned?'Unpin':'Pin'}</button>
+                        <button onClick={()=>toggleStar(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}><Star size={12}/> {starredIds.has(msg.id)?'Unstar':'Star'}</button>
                       </div>
                       {mine && (
                         <div className="flex gap-1 pt-1" style={{borderTop:'1px solid var(--color-border)'}}>
@@ -583,6 +786,7 @@ async function addReaction(msgId: string, emoji: string) {
                         </div>
                       )}
                     </div>
+                    </>
                   )}
                 </div>
                 {/* Reactions display */}
@@ -596,6 +800,8 @@ async function addReaction(msgId: string, emoji: string) {
                   </div>
                 )}
                 <span className="text-xs" style={{color:'var(--color-text-muted)'}}>
+                  {msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:'var(--color-accent)'}}/>}
+                  {starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}
                   {new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
                   {msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}
                   {mine && !msg.failed && (msg.read_at
@@ -655,6 +861,13 @@ async function addReaction(msgId: string, emoji: string) {
               <Pencil size={12}/>
               <span className="flex-1 truncate">Editing your message</span>
               <button type="button" onClick={()=>{setEditing(null); setInput('');}}><X size={14}/></button>
+            </div>
+          )}
+          {replyTo && !editing && (
+            <div className="absolute left-0 right-0 flex items-center gap-2 px-4 py-2 text-xs z-20" style={{bottom:'100%',background:'var(--color-secondary)',borderTop:'1px solid var(--color-border)',color:'var(--color-text-muted)'}}>
+              <Reply size={12}/>
+              <span className="flex-1 truncate">Replying to <b style={{color:'var(--color-text)'}}>{senderName(replyTo, replyTo.sender_id===profile?.id?'You':'Friend')}</b>: {quoteSnippet(replyTo)}</span>
+              <button type="button" onClick={()=>setReplyTo(null)}><X size={14}/></button>
             </div>
           )}
           <button
@@ -724,6 +937,29 @@ async function addReaction(msgId: string, emoji: string) {
           onConfirm={deleteSelected}
           onCancel={()=>setConfirmAction(null)}
         />
+      )}
+      {showStarred && (
+        <>
+          <div className="fixed inset-0 z-40" style={{background:'rgba(0,0,0,0.35)'}} onClick={()=>setShowStarred(false)}/>
+          <div className="fixed inset-x-4 top-20 z-50 mx-auto max-w-md rounded-3xl p-4 max-h-[70vh] overflow-y-auto" style={{background:'var(--color-surface)',border:'1px solid var(--color-border)',boxShadow:'0 12px 40px rgba(0,0,0,0.2)'}}>
+            <div className="flex items-center gap-2 mb-3">
+              <Star size={18} style={{color:'#F5B301'}}/>
+              <p className="font-black text-sm theme-text flex-1">Starred messages</p>
+              <button onClick={()=>setShowStarred(false)} className="p-1.5 rounded-full" style={{background:'var(--color-secondary)'}}><X size={14}/></button>
+            </div>
+            {starredMessages.length===0 ? (
+              <p className="text-sm text-center py-6" style={{color:'var(--color-text-muted)'}}>No starred messages yet.<br/>Hold a message and tap Star ⭐ to keep it here — only you can see your stars.</p>
+            ) : starredMessages.map(m=>(
+              <button key={m.id} onClick={()=>{setShowStarred(false); jumpToMessage(m.id);}} className="w-full text-left px-3 py-2.5 rounded-2xl mb-1.5" style={{background:'var(--color-secondary)'}}>
+                <span className="flex items-baseline gap-2">
+                  <span className="text-xs font-bold" style={{color:'var(--color-accent)'}}>{senderName(m, m.sender_id===profile?.id?'You':'Friend')}</span>
+                  <span className="text-[11px]" style={{color:'var(--color-text-muted)'}}>{new Date(m.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'})} {new Date(m.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+                </span>
+                <span className="block text-sm truncate theme-text">{quoteSnippet(m)}</span>
+              </button>
+            ))}
+          </div>
+        </>
       )}
       <style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style>
     </div>
