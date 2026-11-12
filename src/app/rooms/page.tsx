@@ -4,7 +4,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room } from '@/types';
 import { DesktopNav, MobileNav } from '@/components/layout/AppLayout';
-import { Hash, Plus, Search, Lock, Globe, X, ArrowRight } from 'lucide-react';
+import { Hash, Plus, Search, Lock, Globe, X, ArrowRight, KeyRound, Dices } from 'lucide-react';
+import EntryCodePrompt from '@/components/EntryCodePrompt';
+import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
 import Link from 'next/link';
 
 const PRESETS = [
@@ -33,6 +35,24 @@ function RoomsContent() {
   const [inviteCode, setInviteCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState('');
+  // Entry code (optional, set at creation)
+  const [entryCode, setEntryCode] = useState('');
+  // Join flow step 2: the room needs an entry code
+  const [joinStep, setJoinStep] = useState<'invite' | 'code'>('invite');
+  const [pendingRoom, setPendingRoom] = useState<Room | null>(null);
+  const [entryError, setEntryError] = useState('');
+  const [verifying, setVerifying] = useState(false);
+
+  function closeModal() {
+    setModal(null);
+    setJoinStep('invite');
+    setPendingRoom(null);
+    setEntryError('');
+    setInviteCode('');
+    setEntryCode('');
+    setJoinError('');
+    setCreateError('');
+  }
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -66,7 +86,13 @@ function RoomsContent() {
     }).select().single();
     if (error || !room) { setCreateError(error?.message||'Failed to create room.'); setCreating(false); return; }
     await supabase.from('room_members').insert({ room_id: room.id, user_id: profile!.id, role: 'owner' });
-    setModal(null); setName(''); setDesc('');
+    const code = normalizeEntryCode(entryCode);
+    if (code) {
+      if (!isValidEntryCode(code)) { setCreateError('Entry code must be 4-8 letters or digits.'); setCreating(false); return; }
+      const { error: codeErr } = await supabase.rpc('set_room_entry_code', { p_room_id: room.id, p_code: code });
+      if (codeErr) { setCreateError('Room created, but the entry code could not be saved. You can set it in Room Settings.'); setCreating(false); return; }
+    }
+    setModal(null); setName(''); setDesc(''); setEntryCode('');
     router.push(`/rooms/${room.id}`);
   }
 
@@ -79,9 +105,35 @@ function RoomsContent() {
     if (!room) { setJoinError('Invalid invite code. Double-check and try again!'); setJoining(false); return; }
     const { data: existing } = await supabase.from('room_members').select('id').eq('room_id', room.id).eq('user_id', profile!.id).single();
     if (existing) { router.push(`/rooms/${room.id}`); return; }
+    // Members never see this step; only new joiners of coded rooms do.
+    if ((room as Room).has_entry_code) {
+      setPendingRoom(room as Room);
+      setJoinStep('code');
+      setJoining(false);
+      return;
+    }
     await supabase.from('room_members').insert({ room_id: room.id, user_id: profile!.id, role: 'member' });
     setModal(null); setInviteCode('');
     router.push(`/rooms/${room.id}`);
+  }
+
+  async function submitEntryCode(code: string) {
+    if (!pendingRoom || !profile) return;
+    setVerifying(true); setEntryError('');
+    const supabase = createClient();
+    const { data: ok, error } = await supabase.rpc('verify_room_entry_code', { p_room_id: pendingRoom.id, p_code: normalizeEntryCode(code) });
+    if (error || !ok) {
+      setEntryError("That code doesn't match — try again ♡");
+      setVerifying(false);
+      return;
+    }
+    const { data: existing } = await supabase.from('room_members').select('id').eq('room_id', pendingRoom.id).eq('user_id', profile.id).single();
+    if (!existing) {
+      await supabase.from('room_members').insert({ room_id: pendingRoom.id, user_id: profile.id, role: 'member' });
+    }
+    const roomId = pendingRoom.id;
+    closeModal();
+    router.push(`/rooms/${roomId}`);
   }
 
   if (loading) return <Loading/>;
@@ -130,6 +182,7 @@ function RoomsContent() {
                           <p className="font-black text-sm theme-text truncate">{room.name}</p>
                           <p className="text-xs flex items-center gap-1" style={{color:'var(--color-text-muted)'}}>
                             {room.is_private?<><Lock size={10}/>Private</>:<><Globe size={10}/>Public</>}
+                            {room.has_entry_code && <span className="inline-flex items-center gap-0.5 font-bold" style={{color:'var(--color-accent)'}}><KeyRound size={10}/>Entry code</span>}
                           </p>
                         </div>
                         <ArrowRight size={16} style={{color:'var(--color-text-muted)'}}/>
@@ -157,7 +210,7 @@ function RoomsContent() {
           <div className="theme-card w-full max-w-md p-6 space-y-4" style={{maxHeight:'90vh',overflowY:'auto'}}>
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-black theme-text">{modal==='create'?'Create a Room ♡':'Join a Room'}</h2>
-              <button onClick={()=>setModal(null)} className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><X size={16}/></button>
+              <button onClick={closeModal} className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><X size={16}/></button>
             </div>
 
             {modal==='create' && (
@@ -187,11 +240,23 @@ function RoomsContent() {
                     </button>
                   ))}
                 </div>
+                <div>
+                  <label className="text-xs font-bold mb-2 block" style={{color:'var(--color-text-muted)'}}>Entry code (optional) 🔑</label>
+                  <div className="flex gap-2">
+                    <input type="text" placeholder="e.g. SUNNY42 — leave empty for open entry" value={entryCode}
+                      onChange={e=>setEntryCode(e.target.value.toUpperCase())}
+                      className="theme-input flex-1 py-3 px-4 text-sm font-mono tracking-widest uppercase" maxLength={8}/>
+                    <button type="button" onClick={()=>setEntryCode(generateEntryCode())} className="theme-btn-outline px-3 py-2 text-sm flex items-center gap-1.5 flex-shrink-0" style={{borderColor:'var(--color-border)',color:'var(--color-text-muted)'}} title="Generate a random code">
+                      <Dices size={14}/>Random
+                    </button>
+                  </div>
+                  <p className="text-xs mt-1.5" style={{color:'var(--color-text-muted)'}}>4–8 letters or digits. Friends who are not members yet will type this code to enter. You can change or remove it anytime in Room Settings.</p>
+                </div>
                 <button type="submit" disabled={creating} className="theme-btn w-full py-3 text-sm">{creating?'Creating..':'Create Room ♡'}</button>
               </form>
             )}
 
-            {modal==='join' && (
+            {modal==='join' && joinStep==='invite' && (
               <form onSubmit={joinRoom} className="space-y-4">
                 {joinError && <div className="p-3 rounded-xl text-sm font-medium" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>{joinError}</div>}
                 <div>
@@ -202,6 +267,17 @@ function RoomsContent() {
                 </div>
                 <button type="submit" disabled={joining||inviteCode.length<4} className="theme-btn w-full py-3 text-sm">{joining?'Joining..':'Join Room'}</button>
               </form>
+            )}
+            {modal==='join' && joinStep==='code' && pendingRoom && (
+              <EntryCodePrompt
+                roomName={pendingRoom.name}
+                accentColor="var(--color-accent)"
+                error={entryError}
+                busy={verifying}
+                onSubmit={submitEntryCode}
+                onCancel={()=>{ setJoinStep('invite'); setPendingRoom(null); setEntryError(''); }}
+                submitLabel="Unlock & Join ♡"
+              />
             )}
           </div>
         </div>
