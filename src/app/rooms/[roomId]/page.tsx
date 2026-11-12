@@ -14,6 +14,7 @@ import Link from 'next/link';
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
+import { notifyRoom, notifyGame } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import EntryCodePrompt from '@/components/EntryCodePrompt';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
@@ -81,6 +82,8 @@ export default function RoomPage() {
   const [highlightId, setHighlightId] = useState<string|null>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [jumpNote, setJumpNote] = useState('');
+  const [menuBelow, setMenuBelow] = useState(false);
+  const [starredLoading, setStarredLoading] = useState(false);
   // Entry-code gate (non-members of coded rooms) + settings (owner)
   const [needsCode, setNeedsCode] = useState(false);
   const [gateError, setGateError] = useState('');
@@ -271,6 +274,7 @@ export default function RoomPage() {
     const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: text, type: 'text', reply_to_id: replyTo?.id ?? null }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
+      if (room) void notifyRoom(supabase, profile, room, members, 'text', text);
     } else {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...x, failed: true } : x));
       setSendError("Message couldn't be sent. Tap it to retry.");
@@ -391,9 +395,9 @@ export default function RoomPage() {
 
   // Long-press (touch) or right-click on my own message opens Edit/Delete
   const pressTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
-  function startPress(id: string) {
+  function startPress(id: string, clientY?: number) {
     if (pressTimer.current) clearTimeout(pressTimer.current);
-    pressTimer.current = setTimeout(()=>setActionMsg(id), 450);
+    pressTimer.current = setTimeout(()=>{ setMenuBelow((clientY ?? 999) < 240); setActionMsg(id); }, 450);
   }
   function endPress() {
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
@@ -416,9 +420,12 @@ export default function RoomPage() {
   async function togglePin(msg: Message) {
     setActionMsg(null);
     const supabase = createClient();
-    const { error } = await supabase.rpc('set_message_pinned', { p_message_id: msg.id, p_pin: !msg.is_pinned });
+    const pinning = !msg.is_pinned;
+    const { error } = await supabase.rpc('set_message_pinned', { p_message_id: msg.id, p_pin: pinning });
     if (error) { setSendError("Couldn't change that pin. Please try again."); return; }
-    setMessages(m=>m.map(x=>x.id===msg.id ? { ...x, is_pinned: !msg.is_pinned, pinned_at: !msg.is_pinned ? new Date().toISOString() : null } : x));
+    const stamped = { ...msg, is_pinned: pinning, pinned_at: pinning ? new Date().toISOString() : null };
+    setMessages(m=>m.map(x=>x.id===msg.id ? stamped : x));
+    setPinnedList(prev => pinning ? [stamped, ...prev.filter(x=>x.id!==msg.id)] : prev.filter(x=>x.id!==msg.id));
   }
 
   async function toggleStar(msg: Message) {
@@ -437,14 +444,17 @@ export default function RoomPage() {
   async function openStarred() {
     setShowChatMenu(false);
     if (!profile) return;
+    setShowStarred(true);
+    setStarredLoading(true);
+    setStarredMessages([]);
     const supabase = createClient();
     const { data: rows } = await supabase.from('message_stars').select('message_id').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(200);
     const ids = (rows||[]).map((r:any)=>r.message_id);
-    if (!ids.length) { setStarredMessages([]); setShowStarred(true); return; }
+    if (!ids.length) { setStarredMessages([]); setStarredLoading(false); return; }
     const { data } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').in('id', ids).order('created_at', { ascending: false });
     const mine = (data||[]).filter((m:any)=>m.room_id===roomId);
     setStarredMessages(mine as Message[]);
-    setShowStarred(true);
+    setStarredLoading(false);
   }
 
   // Jump to a message (from a quote, the pinned bar, or Starred): load
@@ -599,6 +609,7 @@ export default function RoomPage() {
       const { error: insertErr } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: file.name, media_url: publicUrl, type, reply_to_id: replyTo?.id ?? null });
       setReplyTo(null);
       if (insertErr) setSendError("Couldn't send that file. Please try again.");
+      else if (room) void notifyRoom(supabase, profile, room, members, type, file.name);
     } else {
       setSendError("Upload failed. Please try again.");
     }
@@ -626,6 +637,7 @@ export default function RoomPage() {
           const { error: insertErr } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: 'Voice message', media_url: publicUrl, type: 'audio', reply_to_id: replyTo?.id ?? null });
           setReplyTo(null);
           if (insertErr) setSendError("Couldn't send that voice message. Please try again.");
+          else if (room) void notifyRoom(supabase, profile, room, members, 'audio', 'Voice message');
         }
         setUploading(false);
       };
@@ -751,7 +763,7 @@ export default function RoomPage() {
               <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,255,255,0.85)',color:'var(--color-text-muted)'}}>{jumpNote} <button onClick={()=>setJumpNote('')} className="underline ml-1">Dismiss</button></div>
             )}
             {pinnedList.length > 0 && (
-              <button onClick={()=>{ const cur = pinnedList[pinIndex % pinnedList.length]; jumpToMessage(cur.id); setPinIndex(i=>i+1); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',borderBottom:`1px solid ${accentColor}33`}}>
+              <button onClick={()=>{ const next = (pinIndex + 1) % pinnedList.length; setPinIndex(next); jumpToMessage(pinnedList[next].id); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',borderBottom:`1px solid ${accentColor}33`}}>
                 <Pin size={14} style={{color:accentColor}} className="flex-shrink-0"/>
                 <span className="text-xs font-bold truncate" style={{color:'var(--color-text)'}}>{senderName(pinnedList[pinIndex % pinnedList.length], pinnedList[pinIndex % pinnedList.length].sender_id === profile?.id ? 'You' : 'Member')}: <span className="font-normal" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(pinnedList[pinIndex % pinnedList.length])}</span></span>
                 {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:accentColor}}>{pinnedList.length} pinned · tap to cycle</span>}
@@ -796,8 +808,8 @@ export default function RoomPage() {
                       {!mine && <span className="text-xs font-bold px-1" style={{color:accentColor}}>{sender?.display_name||sender?.username}</span>}
                       <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
                         style={{background:mine?accentColor+22:'rgba(255,255,255,0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:'var(--color-text)'}}
-                        onContextMenu={e=>{if(!selectMode){e.preventDefault();setActionMsg(msg.id);}}}
-                        onTouchStart={()=>{if(!selectMode) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}
+                        onContextMenu={e=>{if(!selectMode){e.preventDefault();setMenuBelow(e.clientY < 240);setActionMsg(msg.id);}}}
+                        onTouchStart={(e)=>{if(!selectMode) startPress(msg.id, e.touches[0]?.clientY);}} onTouchEnd={endPress} onTouchMove={endPress}
                         onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}>
                         {msg.reply_to_id && (() => {
                           const q = quotedOf(msg);
@@ -841,7 +853,7 @@ export default function RoomPage() {
                         {actionMsg===msg.id && (
                           <>
                           <div className="fixed inset-0 z-[5]" onClick={()=>setActionMsg(null)}/>
-                          <div className={`absolute bottom-full mb-1 ${mine?'right-0':'left-0'} flex flex-col gap-1 p-1.5 rounded-2xl z-20`} style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
+                          <div className={`absolute ${menuBelow?'top-full mt-1':'bottom-full mb-1'} ${mine?'right-0':'left-0'} flex flex-col gap-1 p-1.5 rounded-2xl z-20`} style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
                             <div className="flex gap-1">
                               <button onClick={()=>startReply(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Reply size={12}/> Reply</button>
                               {(myRole==='owner'||myRole==='moderator') && (
@@ -1083,7 +1095,9 @@ export default function RoomPage() {
               <p className="font-black text-sm theme-text flex-1">Starred messages</p>
               <button onClick={()=>setShowStarred(false)} className="p-1.5 rounded-full" style={{background:`${accentColor}22`}}><X size={14}/></button>
             </div>
-            {starredMessages.length===0 ? (
+            {starredLoading ? (
+              <p className="text-sm text-center py-6" style={{color:'var(--color-text-muted)'}}>Loading your stars… ♡</p>
+            ) : starredMessages.length===0 ? (
               <p className="text-sm text-center py-6" style={{color:'var(--color-text-muted)'}}>No starred messages yet.<br/>Hold a message and tap Star ⭐ to keep it here — only you can see your stars.</p>
             ) : starredMessages.map(m=>(
               <button key={m.id} onClick={()=>{setShowStarred(false); jumpToMessage(m.id);}} className="w-full text-left px-3 py-2.5 rounded-2xl mb-1.5" style={{background:`${accentColor}22`}}>
@@ -1213,6 +1227,8 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       await supabase.from('game_players').upsert({ game_id: g.id, user_id: profile.id }, { onConflict: 'game_id,user_id' });
       setLiveGame(g as Game);
       openGame(g as Game);
+      const { data: rm } = await supabase.from('rooms').select('*').eq('id', roomId).single();
+      if (rm) void notifyGame(supabase, profile, rm as Room, g.id, type);
     }
   }
 
