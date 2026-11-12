@@ -13,7 +13,7 @@ import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/pr
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName } from '@/lib/chatTools';
 import ConfirmDialog from '@/components/ConfirmDialog';
 
-const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉'];
+const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
 
 export default function DMPage() {
   const router = useRouter();
@@ -570,7 +570,7 @@ async function addReaction(msgId: string, emoji: string) {
                   {/* Reaction picker on hover */}
                   {reactionMsg===msg.id && (
                     <div className="absolute bottom-full mb-1 left-0 flex flex-col gap-1 p-2 rounded-2xl z-10" style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1" style={{flexWrap:'wrap',maxWidth:320}}>
                       {EMOJI_LIST.map(e=><button key={e} onClick={()=>addReaction(msg.id,e)} className="text-lg hover:scale-125 transition-transform">{e}</button>)}
                       <button onClick={()=>setReactionMsg(null)} className="text-xs p-1"><X size={12}/></button>
                       </div>
