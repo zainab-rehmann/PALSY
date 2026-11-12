@@ -61,6 +61,8 @@ function DesktopNav({ profile, active }: { profile: Profile|null; active: string
 
   async function logout() {
     const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) await supabase.from('profiles').update({ is_online: false, last_seen: new Date().toISOString() }).eq('id', user.id);
     await supabase.auth.signOut();
     router.replace('/login');
   }
