@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message } from '@/types';
@@ -9,7 +9,7 @@ import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image a
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
-import { isFreshOnline, presenceLabel } from '@/lib/presence';
+import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉'];
 
@@ -128,6 +128,18 @@ export default function DMPage() {
   }, [router, friendId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // Presence refresh: realtime can lag or drop, so re-read the friend's
+  // status every 10s. The re-render is also what flips Online to
+  // "last seen ..." once their heartbeat goes stale.
+  useEffect(() => {
+    const supabase = createClient();
+    const t = setInterval(async () => {
+      const { data } = await supabase.from('profiles').select('is_online,last_seen,display_name,username,avatar_url,theme').eq('id', friendId).single();
+      if (data) setFriend(prev => (prev ? { ...prev, ...data } : prev));
+    }, 10000);
+    return () => clearInterval(t);
+  }, [friendId]);
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -317,15 +329,27 @@ async function addReaction(msgId: string, emoji: string) {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.map(msg=>{
+        {messages.map((msg, i)=>{
           const mine = msg.sender_id === profile?.id;
-          if (msg.is_deleted) return (
-            <div key={msg.id} className={`flex ${mine?'justify-end':'justify-start'}`}>
-              <span className="text-xs italic px-3 py-1.5 rounded-2xl" style={{color:'var(--color-text-muted)',background:'var(--color-secondary)'}}>Message deleted</span>
+          // WhatsApp-style day divider: Today / Yesterday / full date.
+          const prev = messages[i-1];
+          const divider = (!prev || !sameDay(prev.created_at, msg.created_at)) ? (
+            <div className="flex justify-center py-1">
+              <span className="text-[11px] font-bold px-3 py-1 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)',border:'1px solid var(--color-border)'}}>{dayDividerLabel(msg.created_at)}</span>
             </div>
+          ) : null;
+          if (msg.is_deleted) return (
+            <Fragment key={msg.id}>
+              {divider}
+              <div className={`flex ${mine?'justify-end':'justify-start'}`}>
+                <span className="text-xs italic px-3 py-1.5 rounded-2xl" style={{color:'var(--color-text-muted)',background:'var(--color-secondary)'}}>Message deleted</span>
+              </div>
+            </Fragment>
           );
           return (
-            <div key={msg.id} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`}>
+            <Fragment key={msg.id}>
+              {divider}
+            <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`}>
               {!mine && <Avatar profile={(msg.sender as Profile)||{}} size={28}/>}
               <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-1`}>
                 <div
@@ -400,6 +424,7 @@ async function addReaction(msgId: string, emoji: string) {
                 </span>
               </div>
             </div>
+            </Fragment>
           );
         })}
         <div ref={bottomRef}/>
