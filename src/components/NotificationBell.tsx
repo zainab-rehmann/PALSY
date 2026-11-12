@@ -5,17 +5,18 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { AppNotification } from '@/types';
 import { Bell } from 'lucide-react';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { notificationHref, notificationIcon, timeAgo } from '@/lib/notify';
 
-// The notification bell + dropdown, used in the dashboard header, the
-// desktop sidebar and the mobile bottom bar. The badge and list refresh
-// live (broadcast poke + database updates) with a polling fallback.
+// The notification bell + dropdown, used in the dashboard header and the
+// desktop sidebar. The badge and list refresh live (broadcast poke +
+// database updates) with a polling fallback.
 export default function NotificationBell({ variant }: { variant: 'icon' | 'navRow' | 'navItem' }) {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [items, setItems] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   // Escape closes the panel (the backdrop click already does).
   useEffect(() => {
@@ -81,16 +82,11 @@ export default function NotificationBell({ variant }: { variant: 'icon' | 'navRo
   }
 
   async function clearAll() {
-    if (!confirmClear) {
-      setConfirmClear(true);
-      setTimeout(() => setConfirmClear(false), 3000);
-      return;
-    }
     if (!userId) return;
     const supabase = createClient();
     await supabase.from('notifications').delete().eq('user_id', userId);
     setItems([]);
-    setConfirmClear(false);
+    setShowClearConfirm(false);
   }
 
   const badge = unread > 0 ? (
@@ -142,7 +138,7 @@ export default function NotificationBell({ variant }: { variant: 'icon' | 'navRo
                 <button onClick={markAllRead} className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: 'var(--color-secondary)', color: 'var(--color-accent)' }}>Mark all read</button>
               )}
               {items.length > 0 && (
-                <button onClick={clearAll} className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: 'rgba(255,107,107,0.1)', color: '#FF6B6B' }}>{confirmClear ? 'Sure?' : 'Clear'}</button>
+                <button onClick={() => setShowClearConfirm(true)} className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: 'rgba(255,107,107,0.1)', color: '#FF6B6B' }}>Clear</button>
               )}
             </div>
             {items.length === 0 ? (
@@ -165,6 +161,15 @@ export default function NotificationBell({ variant }: { variant: 'icon' | 'navRo
             ))}
           </div>
         </>
+      )}
+      {showClearConfirm && (
+        <ConfirmDialog
+          title="Clear all notifications?"
+          message="This deletes every notification in your bell. You can't undo it."
+          confirmLabel="Clear all"
+          onConfirm={clearAll}
+          onCancel={() => setShowClearConfirm(false)}
+        />
       )}
     </div>
   );
