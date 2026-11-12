@@ -1,10 +1,11 @@
 'use client';
-import { Suspense, useEffect, useState, useCallback } from 'react';
+import { Suspense, useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Friendship, FriendRequest } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
 import { Search, UserPlus, Check, X, Users, MessageCircle, UserMinus } from 'lucide-react';
+import { isFreshOnline, presenceLabel } from '@/lib/presence';
 import Link from 'next/link';
 
 type Tab = 'friends' | 'search' | 'requests';
@@ -20,6 +21,13 @@ function FriendsContent() {
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [suggestions, setSuggestions] = useState<Profile[]>([]);
+  const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const profileRef = useRef<Profile|null>(null);
+  profileRef.current = profile;
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -35,30 +43,96 @@ function FriendsContent() {
 
     const { data: reqs } = await supabase.from('friend_requests').select('*,sender:profiles!sender_id(*)').eq('receiver_id', user.id).eq('status','pending');
     setRequests(reqs||[]);
+
+    const { data: sent } = await supabase.from('friend_requests').select('receiver_id').eq('sender_id', user.id).eq('status','pending');
+    setPendingIds((sent||[]).map(r=>r.receiver_id));
     setLoading(false);
   }, [router]);
 
   useEffect(() => { load(); }, [load]);
 
-  async function search() {
-    if (!searchQuery.trim() || searchQuery.length < 2) return;
-    setSearching(true);
+  // Live presence: refresh a friend's online/last-seen the moment it changes.
+  useEffect(() => {
     const supabase = createClient();
-    const { data } = await supabase.from('profiles').select('*').or(`username.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`).neq('id', profile?.id).limit(20);
-    setSearchResults(data||[]);
+    const channel = supabase.channel('friends-presence')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, (payload) => {
+        const upd = payload.new as Profile;
+        setFriends(prev => prev.map(f => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen } : f));
+        setSuggestions(prev => prev.map(f => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen } : f));
+        setSearchResults(prev => prev.map(f => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen } : f));
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // People on PALSY: shown when the Find tab opens, so it is never blank.
+  const loadSuggestions = useCallback(async () => {
+    if (suggestionsLoaded || !profileRef.current) return;
+    setSuggestionsLoaded(true);
+    const supabase = createClient();
+    const { data } = await supabase.from('profiles').select('*').neq('id', profileRef.current.id).order('username', { ascending: true }).limit(20);
+    setSuggestions(data||[]);
+  }, [suggestionsLoaded]);
+
+  useEffect(() => { if (tab==='search') loadSuggestions(); }, [tab, loadSuggestions]);
+
+  // PostgREST logic-tree characters ( , ( ) ) and LIKE wildcards break the
+  // search filter and used to fail silently, showing nothing. Strip them.
+  function cleanTerm(q: string) {
+    return q.replace(/[,()%_\\]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  const runSearch = useCallback(async (raw: string) => {
+    const q = cleanTerm(raw);
+    const me = profileRef.current;
+    if (!me) return;
+    if (q.length < 2) { setSearchResults([]); setSearched(false); setSearchError(''); return; }
+    setSearching(true);
+    setSearchError('');
+    const supabase = createClient();
+    const { data, error } = await supabase.from('profiles').select('*').or(`username.ilike.%${q}%,display_name.ilike.%${q}%`).neq('id', me.id).limit(20);
+    if (error) {
+      setSearchError('Search could not run just now. Please try again.');
+      setSearchResults([]);
+    } else {
+      setSearchResults(data||[]);
+    }
+    setSearched(true);
     setSearching(false);
+  }, []);
+
+  // Search as you type (debounced), as well as on Search / Enter.
+  useEffect(() => {
+    if (!searchQuery.trim()) { setSearchResults([]); setSearched(false); setSearchError(''); return; }
+    const t = setTimeout(() => { runSearch(searchQuery); }, 400);
+    return () => clearTimeout(t);
+  }, [searchQuery, runSearch]);
+
+  async function search() {
+    runSearch(searchQuery);
   }
 
   async function sendRequest(toId: string) {
     const supabase = createClient();
-    await supabase.from('friend_requests').insert({ sender_id: profile!.id, receiver_id: toId });
+    const me = profileRef.current;
+    if (!me) return;
+    // Don't send the same request twice.
+    const { data: existing } = await supabase.from('friend_requests').select('id').eq('sender_id', me.id).eq('receiver_id', toId).eq('status','pending').limit(1);
+    if (existing && existing.length > 0) {
+      setPendingIds(ids => [...ids, toId]);
+      return;
+    }
+    const { error } = await supabase.from('friend_requests').insert({ sender_id: me.id, receiver_id: toId });
+    if (error) return;
     await supabase.from('notifications').insert({
       user_id: toId, type: 'friend_request',
       title: 'New friend request!',
-      body: `${profile?.display_name||profile?.username} wants to be your friend ♡`,
-      data: { sender_id: profile!.id }
+      body: `${me.display_name||me.username} wants to be your friend ♡`,
+      data: { sender_id: me.id }
     });
+    setPendingIds(ids => [...ids, toId]);
     setSearchResults(r => r.filter(p => p.id !== toId));
+    setSuggestions(r => r.filter(p => p.id !== toId));
   }
 
   async function respond(reqId: string, senderId: string, accept: boolean) {
@@ -77,6 +151,29 @@ function FriendsContent() {
     const supabase = createClient();
     await supabase.from('friendships').delete().or(`and(user_id.eq.${profile!.id},friend_id.eq.${friendId}),and(user_id.eq.${friendId},friend_id.eq.${profile!.id})`);
     load();
+  }
+
+  function userRow(u: Profile) {
+    const isFriend = friends.some(f=>f.id===u.id);
+    const pending = pendingIds.includes(u.id);
+    return (
+      <div key={u.id} className="theme-card p-4 flex items-center gap-3">
+        <div className="relative"><Avatar profile={u} size={44}/><div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white" style={{background:isFreshOnline(u)?'#4ADE80':'#9CA3AF'}}/></div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-sm theme-text">{u.display_name||u.username}</p>
+          <p className="text-xs" style={{color:'var(--color-text-muted)'}}>@{u.username} · {presenceLabel(u)}</p>
+        </div>
+        {isFriend ? (
+          <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)'}}>Friends ♡</span>
+        ) : pending ? (
+          <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)'}}>Requested</span>
+        ) : (
+          <button onClick={()=>sendRequest(u.id)} className="theme-btn px-3 py-1.5 text-xs flex items-center gap-1.5">
+            <UserPlus size={13}/>Add
+          </button>
+        )}
+      </div>
+    );
   }
 
   if (loading) return <LoadingScreen/>;
@@ -108,10 +205,10 @@ function FriendsContent() {
                 <div className="space-y-2">
                   {friends.map(f=>(
                     <div key={f.id} className="theme-card p-4 flex items-center gap-3">
-                      <div className="relative"><Avatar profile={f} size={44}/><div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white" style={{background:f.is_online?'#4ADE80':'#9CA3AF'}}/></div>
+                      <div className="relative"><Avatar profile={f} size={44}/><div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white" style={{background:isFreshOnline(f)?'#4ADE80':'#9CA3AF'}}/></div>
                       <div className="flex-1 min-w-0">
                         <p className="font-bold text-sm theme-text">{f.display_name||f.username}</p>
-                        <p className="text-xs" style={{color:'var(--color-text-muted)'}}>@{f.username} · {f.is_online?'Online':'Offline'}</p>
+                        <p className="text-xs" style={{color:'var(--color-text-muted)'}}>@{f.username} · {presenceLabel(f)}</p>
                       </div>
                       <div className="flex gap-2">
                         <Link href={`/messages/${f.id}`} className="p-2 rounded-xl transition-all" style={{background:'var(--color-secondary)'}}>
@@ -139,28 +236,25 @@ function FriendsContent() {
                 </div>
                 <button onClick={search} disabled={searching} className="theme-btn px-5 py-3 text-sm">{searching?'..':'Search'}</button>
               </div>
+              {searchError && (
+                <p className="text-sm text-center font-semibold" style={{color:'#FF6B6B'}}>{searchError}</p>
+              )}
               {searchResults.length>0 && (
                 <div className="space-y-2">
-                  {searchResults.map(u=>(
-                    <div key={u.id} className="theme-card p-4 flex items-center gap-3">
-                      <Avatar profile={u} size={44}/>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-sm theme-text">{u.display_name||u.username}</p>
-                        <p className="text-xs" style={{color:'var(--color-text-muted)'}}>@{u.username}</p>
-                      </div>
-                      {friends.some(f=>f.id===u.id) ? (
-                        <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)'}}>Friends ♡</span>
-                      ) : (
-                        <button onClick={()=>sendRequest(u.id)} className="theme-btn px-3 py-1.5 text-xs flex items-center gap-1.5">
-                          <UserPlus size={13}/>Add
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                  {searchResults.map(u=>userRow(u))}
                 </div>
               )}
-              {searchQuery && searchResults.length===0 && !searching && (
+              {searched && searchResults.length===0 && !searching && !searchError && (
                 <EmptyState icon="🔍" title="No users found" desc={`No results for "${searchQuery}". Try a different username!`}/>
+              )}
+              {!searchQuery.trim() && !searched && suggestions.length>0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-bold theme-text pt-1">People on PALSY ♡</p>
+                  {suggestions.map(u=>userRow(u))}
+                </div>
+              )}
+              {!searchQuery.trim() && !searched && suggestions.length===0 && (
+                <EmptyState icon="🔍" title="Find your friends" desc="Type a username or name above — results appear as you type."/>
               )}
             </div>
           )}
