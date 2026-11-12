@@ -23,7 +23,7 @@ export function formatLastSeen(iso: string | null | undefined): string {
   const days = Math.round((startOf(now) - startOf(d)) / 86400000);
   if (days <= 0) return `last seen today at ${time}`;
   if (days === 1) return `last seen yesterday at ${time}`;
-  return `last seen ${d.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  return `last seen ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`;
 }
 
 export function presenceLabel(p: Partial<Profile> | null | undefined): string {
@@ -49,5 +49,5 @@ export function dayDividerLabel(iso: string): string {
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (sameDay(d, yesterday)) return 'Yesterday';
-  return d.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
