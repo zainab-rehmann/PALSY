@@ -21,20 +21,40 @@ export default function EmojiPicker({ onPick }: { onPick: (emoji: string) => voi
 
   const q = query.trim().toLowerCase();
   // Match whole words by prefix ("cat" finds cat faces, not "vacation").
-  // A longer query word also matches a shorter name word ("cats" finds "cat").
+  // Plurals match their singular ("cats" finds "cat", "eyes" finds "eye").
+  // Short name words must NOT prefix-match a longer query ("rocket" must
+  // not pull in "rock" emojis, "sparkles" must not pull in "spa" ones).
   const qWords = q.split(/\s+/).filter(Boolean);
+  const singular = (w: string) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
   const results = useMemo(() => {
     if (!q) return [];
-    const out: { e: string; n: string; group: string }[] = [];
+    const seen = new Set<string>();
+    const scored: { e: string; n: string; group: string; score: number; lead: number }[] = [];
     for (const g of EMOJI_GROUPS) {
       for (const item of g.emojis) {
         const words = item.n.split(/[^a-z0-9]+/).filter(Boolean);
-        if (qWords.every(qw => words.some(w => w.startsWith(qw) || (qw.length >= 4 && w.length >= 3 && qw.startsWith(w))))) {
-          out.push({ ...item, group: g.label });
+        let score = 0;
+        let ok = true;
+        for (const qw of qWords) {
+          const sq = singular(qw);
+          const exact = words.some((w) => w === qw || singular(w) === sq);
+          const prefix = !exact && words.some((w) => w.startsWith(qw));
+          if (!exact && !prefix) { ok = false; break; }
+          score += exact ? 0 : 1;
         }
+        // Same emoji can appear in two groups (the curated hearts overlap
+        // the full set) — show it once.
+        if (!ok || seen.has(item.e)) continue;
+        seen.add(item.e);
+        // Lead bonus: the emoji whose name starts with the query comes
+        // first ("sparkles" → ✨ before 💖, "rocket" → 🚀 first).
+        const first = words[0] || '';
+        const lead = first === qWords[0] || singular(first) === singular(qWords[0]) || first.startsWith(qWords[0]) ? 0 : 1;
+        scored.push({ ...item, group: g.label, score, lead });
       }
     }
-    return out;
+    scored.sort((a, b) => a.score - b.score || a.lead - b.lead);
+    return scored;
   }, [q, qWords]);
   const shown = results.slice(0, SEARCH_CAP);
   const activeGroup = EMOJI_GROUPS.find(g => g.id === active) || EMOJI_GROUPS[0];
