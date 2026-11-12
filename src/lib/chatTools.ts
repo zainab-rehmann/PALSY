@@ -28,10 +28,22 @@ function exportLine(msg: Message, senderName: string): string {
   return `${date}, ${time} - ${senderName}: ${lines[0]}` + lines.slice(1).map((l) => `\n    ${l}`).join('');
 }
 
+// Short label for a quoted message: a text preview, or a media placeholder.
+export function quoteSnippet(msg: Message): string {
+  if (msg.is_deleted || !msg.content) return 'Message deleted';
+  if (msg.type === 'image') return '[Photo]';
+  if (msg.type === 'video') return '[Video]';
+  if (msg.type === 'audio' || msg.type === 'voice') return '[Voice message]';
+  if (msg.type === 'file') return `[File: ${msg.content}]`;
+  const one = msg.content.replace(/\s+/g, ' ').trim();
+  return one.length > 80 ? one.slice(0, 80) + '…' : one;
+}
+
 export function buildTranscript(
   title: string,
   messages: Message[],
   nameOf: (msg: Message) => string,
+  quoteLine?: (msg: Message) => string | null,
 ): string {
   const exported = new Date().toLocaleString([], {
     day: 'numeric',
@@ -41,7 +53,13 @@ export function buildTranscript(
     minute: '2-digit',
   });
   const header = [`PALSY chat export`, title, `Exported ${exported}`, ''];
-  return [...header, ...messages.map((m) => exportLine(m, nameOf(m)))].join('\n') + '\n';
+  const lines: string[] = [];
+  for (const m of messages) {
+    const q = quoteLine?.(m);
+    if (q) lines.push(q);
+    lines.push(exportLine(m, nameOf(m)));
+  }
+  return [...header, ...lines].join('\n') + '\n';
 }
 
 export function downloadTextFile(filename: string, text: string) {
