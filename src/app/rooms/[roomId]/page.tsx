@@ -584,7 +584,26 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         }
       })
       .subscribe();
-    return () => { cancelled = true; supabase.removeChannel(channel); };
+    // Polling fallback: if realtime ever lags or drops, the live banner
+    // and any open game still refresh within a few seconds, so a waiting
+    // screen never looks stuck and results always appear.
+    const poll = setInterval(async () => {
+      if (cancelled) return;
+      const { data } = await supabase.from('games').select('*').eq('room_id', roomId).neq('status','finished').order('created_at', { ascending: false }).limit(1);
+      if (cancelled) return;
+      if (data && data[0]) setLiveGame(data[0] as Game);
+      else setLiveGame(null);
+      const openId = openGameIdRef.current;
+      if (openId) {
+        const { data: og } = await supabase.from('games').select('*').eq('id', openId).single();
+        if (!cancelled && og) {
+          setGame(og as Game);
+          setGameState((og as Game).state);
+          refreshPlayers(openId);
+        }
+      }
+    }, 5000);
+    return () => { cancelled = true; clearInterval(poll); supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, profile?.id]);
 
