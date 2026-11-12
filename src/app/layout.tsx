@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import MessageNotifier from "@/components/MessageNotifier";
+import PresenceManager from "@/components/PresenceManager";
 
 export const metadata: Metadata = {
   title: "PALSY ♡ — Your Little Corner of Friendship",
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-full theme-bg theme-text antialiased" style={{ fontFamily: "'Nunito', sans-serif" }}>
         {children}
         <MessageNotifier />
+        <PresenceManager />
       </body>
     </html>
   );
