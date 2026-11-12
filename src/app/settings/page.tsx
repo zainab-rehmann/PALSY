@@ -12,6 +12,9 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile|null>(null);
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState<''|'checking'|'available'|'taken'|'invalid'>('');
+  const [usernameMsg, setUsernameMsg] = useState('');
   const [bio, setBio] = useState('');
   const [theme, setTheme] = useState<'blue'|'pink'>('blue');
   const [saving, setSaving] = useState(false);
@@ -35,6 +38,7 @@ export default function SettingsPage() {
       if (!prof) { router.replace('/login'); return; }
       setProfile(prof);
       setDisplayName(prof.display_name||'');
+      setUsername(prof.username||'');
       setBio(prof.bio||'');
       setTheme(prof.theme||'blue');
       setNotifEnabled(prof.notifications_enabled !== false);
@@ -74,11 +78,62 @@ export default function SettingsPage() {
     setTimeout(() => setPrivacySaved(false), 2500);
   }
 
+  // Username rules (same as signup): lowercase letters, numbers, underscores, 3–20 chars.
+  function usernameError(u: string): string {
+    if (u.length < 3) return 'Usernames need at least 3 characters.';
+    if (u.length > 20) return 'Usernames can be at most 20 characters.';
+    if (!/^[a-z0-9_]+$/.test(u)) return 'Only lowercase letters, numbers and underscores — no spaces.';
+    return '';
+  }
+
+  // Live availability check as the user types (debounced).
+  useEffect(() => {
+    if (!profile) return;
+    const u = username.trim();
+    if (u === profile.username) { setUsernameStatus(''); setUsernameMsg(m => m === 'Username updated ✓' ? m : ''); return; }
+    const err = usernameError(u);
+    if (err) { setUsernameStatus('invalid'); setUsernameMsg(err); return; }
+    setUsernameStatus('checking'); setUsernameMsg('Checking…');
+    const t = setTimeout(async () => {
+      const supabase = createClient();
+      const { data } = await supabase.from('profiles').select('id').eq('username', u).neq('id', profile.id).limit(1);
+      if (data && data.length > 0) { setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡'); }
+      else { setUsernameStatus('available'); setUsernameMsg('✓ Username available'); }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [username, profile]);
+
   async function saveProfile() {
     if (!profile) return;
+    const u = username.trim();
+    const usernameChanged = u !== profile.username;
+    if (usernameChanged) {
+      const err = usernameError(u);
+      if (err) { setUsernameStatus('invalid'); setUsernameMsg(err); return; }
+      // Re-check right before saving, so a name taken a moment ago is refused.
+      const supabase = createClient();
+      const { data: taken } = await supabase.from('profiles').select('id').eq('username', u).neq('id', profile.id).limit(1);
+      if (taken && taken.length > 0) { setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡'); return; }
+    }
     setSaving(true);
     const supabase = createClient();
-    await supabase.from('profiles').update({ display_name: displayName, bio, theme, updated_at: new Date().toISOString() }).eq('id', profile.id);
+    const updates: Record<string, unknown> = { display_name: displayName, bio, theme, updated_at: new Date().toISOString() };
+    if (usernameChanged) updates.username = u;
+    const { error } = await supabase.from('profiles').update(updates).eq('id', profile.id);
+    if (error) {
+      // Race safety: the database unique rule is the final guard.
+      if ((error as { code?: string }).code === '23505' || /duplicate|unique/i.test(error.message)) {
+        setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡');
+      } else {
+        setUsernameMsg('Could not save just now. Please try again.');
+      }
+      setSaving(false);
+      return;
+    }
+    if (usernameChanged) {
+      setProfile(p => p ? { ...p, username: u } : p);
+      setUsernameStatus(''); setUsernameMsg('Username updated ✓');
+    }
     document.documentElement.setAttribute('data-theme', theme);
     setSaving(false); setSaved(true); setTimeout(()=>setSaved(false),2000);
   }
@@ -139,6 +194,16 @@ export default function SettingsPage() {
 
           {tab==='profile' && (
             <div className="theme-card p-6 space-y-4">
+              <div>
+                <label className="text-xs font-bold mb-1.5 block" style={{color:'var(--color-text-muted)'}}>Username</label>
+                <input type="text" value={username} maxLength={20}
+                  onChange={e=>setUsername(e.target.value.toLowerCase().replace(/\s/g,''))}
+                  className="theme-input w-full py-3 px-4 text-sm" placeholder="your_username"/>
+                <p className="text-xs mt-1.5" style={{color:'var(--color-text-muted)'}}>Lowercase letters, numbers and underscores only, 3–20 characters, no spaces. Your friends, chats and rooms stay yours — only the name changes.</p>
+                {usernameMsg && (
+                  <p className="text-xs mt-1.5 font-bold" style={{color:usernameStatus==='available'||usernameMsg==='Username updated ✓'?'#22C55E':usernameStatus==='checking'?'var(--color-text-muted)':'#FF6B6B'}}>{usernameMsg}</p>
+                )}
+              </div>
               <div>
                 <label className="text-xs font-bold mb-1.5 block" style={{color:'var(--color-text-muted)'}}>Display Name</label>
                 <input type="text" value={displayName} onChange={e=>setDisplayName(e.target.value)} className="theme-input w-full py-3 px-4 text-sm" placeholder="Your display name"/>
