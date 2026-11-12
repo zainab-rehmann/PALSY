@@ -130,9 +130,9 @@ function FriendsContent() {
       body: `${me.display_name||me.username} wants to be your friend ♡`,
       data: { sender_id: me.id }
     });
+    // Keep the row visible with a "Requested" badge (removing it made
+    // search show "No users found" right after tapping Add).
     setPendingIds(ids => [...ids, toId]);
-    setSearchResults(r => r.filter(p => p.id !== toId));
-    setSuggestions(r => r.filter(p => p.id !== toId));
   }
 
   async function respond(reqId: string, senderId: string, accept: boolean) {
