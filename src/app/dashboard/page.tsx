@@ -6,9 +6,10 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room, FriendRequest, Notification } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
+import NotificationBell from '@/components/NotificationBell';
 import { PalsyLogo } from '@/components/branding/PalsyLogo';
 import {
-  Plus, Hash, MessageCircle, Users, Bell, Sparkles, ChevronRight,
+  Plus, Hash, MessageCircle, Users, Sparkles, ChevronRight,
   Gamepad2, UserPlus, Circle, Search, Compass
 } from 'lucide-react';
 
@@ -17,7 +18,6 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile|null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -47,9 +47,6 @@ export default function DashboardPage() {
     const { data: reqs } = await supabase.from('friend_requests').select('*,sender:profiles!sender_id(*)').eq('receiver_id', user.id).eq('status', 'pending');
     setPendingRequests(reqs || []);
 
-    // Load notifications
-    const { data: notifs } = await supabase.from('notifications').select('*').eq('user_id', user.id).eq('is_read', false).order('created_at', { ascending: false }).limit(5);
-    setNotifications(notifs || []);
 
     setLoading(false);
   }, [router]);
@@ -68,7 +65,6 @@ export default function DashboardPage() {
     </div>
   );
 
-  const unreadCount = notifications.length;
 
   return (
     <div className="min-h-screen theme-bg">
@@ -88,14 +84,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-3 ml-auto">
             {/* Notifications bell */}
-            <Link href="/settings" className="relative p-2 rounded-xl transition-all" style={{background:'var(--color-secondary)'}}>
-              <Bell size={18} style={{color:'var(--color-accent)'}}/>
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold text-white" style={{background:'var(--color-accent)',fontSize:10}}>
-                  {unreadCount}
-                </span>
-              )}
-            </Link>
+            <NotificationBell variant="icon"/>
             <Link href="/settings">
               <Avatar profile={profile||{}} size={36}/>
             </Link>
