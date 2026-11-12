@@ -768,7 +768,14 @@ function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any
 function RPS({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
   async function choose(choice: string) {
     if (!profile || !canPlay || state.choices[profile.id]) return;
-    const newChoices = { ...state.choices, [profile.id]: choice };
+    const supabase = createClient();
+    // Re-read the freshest state first: both players often choose at the
+    // same moment, and writing from a stale snapshot would erase the
+    // other player's choice, leaving both screens stuck on "Waiting".
+    const { data: fresh } = await supabase.from('games').select('state').eq('id', game.id).single();
+    const base = (fresh?.state as any) || state;
+    if (base.choices?.[profile.id]) { onUpdate(base); return; }
+    const newChoices = { ...(base.choices || {}), [profile.id]: choice };
     const players = Object.keys(newChoices);
     let winner: string | null = null;
     if (players.length === 2) {
@@ -779,8 +786,7 @@ function RPS({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
       else if (beats[c1]===c2) winner=p1;
       else winner=p2;
     }
-    const newState = { ...state, choices: newChoices, winner };
-    const supabase = createClient();
+    const newState = { ...base, choices: newChoices, winner };
     await supabase.from('games').update({ state: newState, status: winner?'finished':'active', winner_id: winner && winner!=='draw' ? winner : null }).eq('id', game.id);
     onUpdate(newState);
   }
