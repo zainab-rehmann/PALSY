@@ -43,6 +43,7 @@ export interface Room {
   preset: string | null;
   is_private: boolean;
   invite_code: string;
+  has_entry_code: boolean;
   max_members: number;
   owner_id: string;
   created_at: string;
