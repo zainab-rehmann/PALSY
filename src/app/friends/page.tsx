@@ -57,9 +57,11 @@ function FriendsContent() {
     const channel = supabase.channel('friends-presence')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, (payload) => {
         const upd = payload.new as Profile;
-        setFriends(prev => prev.map(f => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen } : f));
-        setSuggestions(prev => prev.map(f => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen } : f));
-        setSearchResults(prev => prev.map(f => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen } : f));
+        // Refresh presence AND profile fields (privacy flips must show live).
+        const patchOne = (f: Profile) => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen, is_private: upd.is_private, bio: upd.bio, display_name: upd.display_name, username: upd.username, avatar_url: upd.avatar_url } : f;
+        setFriends(prev => prev.map(patchOne));
+        setSuggestions(prev => prev.map(patchOne));
+        setSearchResults(prev => prev.map(patchOne));
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -71,12 +73,12 @@ function FriendsContent() {
   useEffect(() => {
     const supabase = createClient();
     const t = setInterval(async () => {
-      const { data } = await supabase.from('profiles').select('id,is_online,last_seen').limit(100);
+      const { data } = await supabase.from('profiles').select('id,is_online,last_seen,is_private,bio,display_name,username,avatar_url').limit(100);
       if (!data) return;
       const byId = new Map(data.map(p => [p.id, p]));
       const patch = (list: Profile[]) => list.map(f => {
         const u = byId.get(f.id);
-        return u ? { ...f, is_online: u.is_online, last_seen: u.last_seen } : f;
+        return u ? { ...f, is_online: u.is_online, last_seen: u.last_seen, is_private: u.is_private, bio: u.bio, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url } : f;
       });
       setFriends(patch);
       setSuggestions(patch);
@@ -185,6 +187,11 @@ function FriendsContent() {
         <div className="flex-1 min-w-0">
           <p className="font-bold text-sm theme-text">{u.display_name||u.username}</p>
           <p className="text-xs" style={{color:'var(--color-text-muted)'}}>@{u.username} · {presenceLabel(u)}</p>
+          {u.is_private && !isFriend ? (
+            <p className="text-xs mt-0.5" style={{color:'var(--color-text-muted)'}}>🔒 This account is private</p>
+          ) : u.bio ? (
+            <p className="text-xs mt-0.5 truncate" style={{color:'var(--color-text-muted)'}}>{u.bio}</p>
+          ) : null}
         </div>
         {isFriend ? (
           <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)'}}>Friends ♡</span>
