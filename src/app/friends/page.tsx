@@ -163,6 +163,9 @@ function FriendsContent() {
         { user_id: profile!.id, friend_id: senderId },
         { user_id: senderId, friend_id: profile!.id }
       ]);
+      // Let the sender know in their bell + pop-ups.
+      const { notifyFriendAccept } = await import('@/lib/notify');
+      void notifyFriendAccept(supabase, profile!, senderId);
     }
     load();
   }
