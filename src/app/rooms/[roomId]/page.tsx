@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room, RoomMember, Message, Game } from '@/types';
@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
+import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
 
 const PRESETS: Record<string,{bg:string;accent:string;emoji:string}> = {
   'cloudy-blue':{bg:'#DCEBFF',accent:'#7CA8E8',emoji:'☁️'},
@@ -111,6 +112,18 @@ export default function RoomPage() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { bottomRef.current?.scrollIntoView({behavior:'smooth'}); }, [messages]);
+
+  // Members presence refresh: realtime can lag or drop, so re-read
+  // members' status every 15s. The re-render is also what flips Online
+  // to "last seen ..." once a heartbeat goes stale.
+  useEffect(() => {
+    const supabase = createClient();
+    const t = setInterval(async () => {
+      const { data: mems } = await supabase.from('room_members').select('*,profile:profiles(*)').eq('room_id', roomId);
+      if (mems) setMembers(mems);
+    }, 15000);
+    return () => clearInterval(t);
+  }, [roomId]);
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -281,7 +294,7 @@ export default function RoomPage() {
 : <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{background:'rgba(255,255,255,0.7)'}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
         <div className="flex-1 min-w-0">
           <p className="font-black text-sm theme-text truncate">{room.name}</p>
-          <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{members.length} members · {members.filter(m=>(m.profile as Profile)?.is_online).length} online</p>
+          <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{members.length} members · {members.filter(m=>isFreshOnline((m.profile as Profile)||null)).length} online</p>
         </div>
         {/* Share */}
         <button onClick={copyInviteCode} className="p-2 rounded-xl transition-all" style={{background:'rgba(255,255,255,0.7)'}}>
@@ -312,11 +325,20 @@ export default function RoomPage() {
                   <p className="text-sm font-bold" style={{color:accentColor}}>{room.welcome_message}</p>
                 </div>
               )}
-              {messages.map(msg=>{
+              {messages.map((msg, i)=>{
                 const mine = msg.sender_id===profile?.id;
                 const sender = msg.sender as Profile;
+                // WhatsApp-style day divider: Today / Yesterday / full date.
+                const prev = messages[i-1];
+                const divider = (!prev || !sameDay(prev.created_at, msg.created_at)) ? (
+                  <div className="flex justify-center py-1">
+                    <span className="text-[11px] font-bold px-3 py-1 rounded-full" style={{background:'rgba(255,255,255,0.9)',color:'var(--color-text-muted)',border:`1px solid ${accentColor}33`}}>{dayDividerLabel(msg.created_at)}</span>
+                  </div>
+                ) : null;
                 return (
-                  <div key={msg.id} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`}>
+                  <Fragment key={msg.id}>
+                    {divider}
+                  <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`}>
                     {!mine && <Avatar profile={sender||{}} size={28}/>}
                     <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-0.5`}>
                       {!mine && <span className="text-xs font-bold px-1" style={{color:accentColor}}>{sender?.display_name||sender?.username}</span>}
@@ -356,6 +378,7 @@ export default function RoomPage() {
                       <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{msg.edited_at?' · edited':''}</span>
                     </div>
                   </div>
+                  </Fragment>
                 );
               })}
               <div ref={bottomRef}/>
@@ -408,14 +431,14 @@ export default function RoomPage() {
               const mp = m.profile as Profile;
               return (
                 <div key={m.id} className="flex items-center gap-3 p-3 rounded-2xl" style={{background:'rgba(255,255,255,0.7)'}}>
-                  <div className="relative"><Avatar profile={mp||{}} size={40}/><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{background:mp?.is_online?'#4ADE80':'#9CA3AF'}}/></div>
+                  <div className="relative"><Avatar profile={mp||{}} size={40}/><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{background:isFreshOnline(mp)?'#4ADE80':'#9CA3AF'}}/></div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-sm theme-text flex items-center gap-1.5">
                       {mp?.display_name||mp?.username}
                       {m.role==='owner'&&<Crown size={12} style={{color:'#FFD97D'}}/>}
                       {m.role==='moderator'&&<Shield size={12} style={{color:accentColor}}/>}
                     </p>
-                    <p className="text-xs" style={{color:'var(--color-text-muted)'}}>@{mp?.username} · {mp?.is_online?'Online':'Offline'}</p>
+                    <p className="text-xs" style={{color:'var(--color-text-muted)'}}>@{mp?.username} · {presenceLabel(mp)}</p>
                   </div>
                   <span className="text-xs capitalize px-2.5 py-1 rounded-full font-semibold"
                     style={{background:`${accentColor}22`,color:accentColor}}>{m.role}</span>
