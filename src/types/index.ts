@@ -9,6 +9,7 @@ export interface Profile {
   avatar_url: string | null;
   theme: Theme;
   notifications_enabled: boolean;
+  is_private: boolean;
   is_online: boolean;
   last_seen: string;
   created_at: string;
