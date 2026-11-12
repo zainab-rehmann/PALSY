@@ -1,6 +1,13 @@
 'use client';
 
-// Small cute confirmation dialog used before destructive chat actions.
+import { createPortal } from 'react-dom';
+
+// Small cute confirmation dialog used before destructive actions (chat
+// clear/delete, clearing all notifications). It renders through a portal
+// to document.body so it always centres on the viewport: nested inside a
+// header or sidebar, a plain fixed element can anchor to a transformed
+// ancestor instead and end up clipped at the top of the screen. The
+// dialog only ever renders after a click, so document.body exists.
 export default function ConfirmDialog({
   title,
   message,
@@ -14,7 +21,7 @@ export default function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(74, 36, 54, 0.45)' }}
@@ -46,6 +53,7 @@ export default function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
