@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
-import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell } from 'lucide-react';
+import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell, Globe } from 'lucide-react';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -23,6 +23,8 @@ export default function SettingsPage() {
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [notifSaved, setNotifSaved] = useState(false);
   const [notifPermission, setNotifPermission] = useState<string>('unsupported');
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [privacySaved, setPrivacySaved] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -36,6 +38,7 @@ export default function SettingsPage() {
       setBio(prof.bio||'');
       setTheme(prof.theme||'blue');
       setNotifEnabled(prof.notifications_enabled !== false);
+      setIsPrivate(prof.is_private === true);
       document.documentElement.setAttribute('data-theme', prof.theme||'blue');
       setLoading(false);
     })();
@@ -59,6 +62,16 @@ export default function SettingsPage() {
     if (!('Notification' in window)) return;
     const result = await Notification.requestPermission().catch(() => 'denied' as NotificationPermission);
     setNotifPermission(result);
+  }
+
+  async function setPrivacy(next: boolean) {
+    if (!profile || next === isPrivate) return;
+    setIsPrivate(next);
+    setProfile(p => p ? { ...p, is_private: next } : p);
+    const supabase = createClient();
+    await supabase.from('profiles').update({ is_private: next }).eq('id', profile.id);
+    setPrivacySaved(true);
+    setTimeout(() => setPrivacySaved(false), 2500);
   }
 
   async function saveProfile() {
@@ -211,6 +224,27 @@ export default function SettingsPage() {
 
           {tab==='account' && (
             <div className="space-y-4">
+              <div className="theme-card p-6 space-y-4">
+                <p className="font-bold theme-text flex items-center gap-2"><Globe size={16} style={{color:'var(--color-accent)'}}/>Account privacy</p>
+                <div className="flex gap-2 p-1 rounded-2xl" style={{background:'var(--color-secondary)'}}>
+                  {([false, true] as const).map(v=>(
+                    <button key={v?'private':'public'} onClick={()=>setPrivacy(v)}
+                      className="flex-1 py-2 rounded-xl text-sm font-bold transition-all"
+                      style={{background:isPrivate===v?'var(--color-surface)':'transparent',color:isPrivate===v?'var(--color-accent)':'var(--color-text-muted)',boxShadow:isPrivate===v?'0 2px 8px var(--color-primary-alpha)':undefined}}>
+                      {v?'🔒 Private':'🌐 Public'}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs leading-relaxed" style={{color:'var(--color-text-muted)'}}>
+                  {isPrivate
+                    ? 'Private: only your friends can see your bio. Everyone can still find you by name and send you a friend request — and every request needs your approval.'
+                    : 'Public: everyone can see your bio. Anyone can find you by name and send you a friend request.'}
+                </p>
+                <p className="text-xs leading-relaxed" style={{color:'var(--color-text-muted)'}}>
+                  Your name, photo and online status are always visible, public or private. Privacy never hides your account — you always stay findable.
+                </p>
+                {privacySaved && <p className="text-xs font-bold" style={{color:'var(--color-accent)'}}>Saved ♡</p>}
+              </div>
               <div className="theme-card p-6 space-y-4">
                 <p className="font-bold theme-text flex items-center gap-2"><Lock size={16} style={{color:'var(--color-accent)'}}/>Change Password</p>
                 <div className="relative">
