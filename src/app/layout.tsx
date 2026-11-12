@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import MessageNotifier from "@/components/MessageNotifier";
+import NotificationPrompt from "@/components/NotificationPrompt";
 import PresenceManager from "@/components/PresenceManager";
 
 export const metadata: Metadata = {
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-full theme-bg theme-text antialiased" style={{ fontFamily: "'Nunito', sans-serif" }}>
         {children}
         <MessageNotifier />
+        <NotificationPrompt />
         <PresenceManager />
       </body>
     </html>
