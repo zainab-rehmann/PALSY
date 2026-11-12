@@ -33,6 +33,24 @@ export async function pokeBell(supabase: Sb, userId: string): Promise<void> {
   } catch {}
 }
 
+// Write one notification row, replacing the previous unread row with the
+// same dedupe key. The replace runs inside the push_notification function
+// (migration 012): a sender cannot delete the recipient's rows directly
+// (row security only allows deleting your own), so the function does the
+// delete+insert atomically and only touches unread rows the caller created.
+async function push(
+  supabase: Sb,
+  userId: string,
+  type: string,
+  title: string,
+  body: string,
+  data: Record<string, string>,
+): Promise<void> {
+  await supabase.rpc('push_notification', {
+    p_user_id: userId, p_type: type, p_title: title, p_body: body, p_data: data,
+  });
+}
+
 // One unread "new message" row per sender — older unread rows from the
 // same sender are replaced so the bell never fills with duplicates.
 export async function notifyDM(
@@ -43,15 +61,8 @@ export async function notifyDM(
   content: string | null,
 ): Promise<void> {
   try {
-    await supabase.from('notifications').delete()
-      .eq('user_id', receiverId).eq('type', 'message').eq('is_read', false)
-      .filter('data->>sender_id', 'eq', sender.id);
-    await supabase.from('notifications').insert({
-      user_id: receiverId,
-      type: 'message',
-      title: `${displayName(sender, 'A friend')} ♡`,
-      body: messagePreview(type, content),
-      data: { sender_id: sender.id },
+    await push(supabase, receiverId, 'message', `${displayName(sender, 'A friend')} ♡`, messagePreview(type, content), {
+      sender_id: sender.id, dedupe_key: `dm:${sender.id}`,
     });
     void pokeBell(supabase, receiverId);
   } catch {}
@@ -71,15 +82,8 @@ export async function notifyRoom(
     const preview = messagePreview(type, content);
     const targets = members.filter((m) => m.user_id !== sender.id && !m.muted);
     for (const t of targets) {
-      await supabase.from('notifications').delete()
-        .eq('user_id', t.user_id).eq('type', 'room_message').eq('is_read', false)
-        .filter('data->>room_id', 'eq', room.id);
-      await supabase.from('notifications').insert({
-        user_id: t.user_id,
-        type: 'room_message',
-        title: `${room.name} ♡`,
-        body: `${displayName(sender, 'Someone')}: ${preview}`,
-        data: { room_id: room.id, sender_id: sender.id },
+      await push(supabase, t.user_id, 'room_message', `${room.name} ♡`, `${displayName(sender, 'Someone')}: ${preview}`, {
+        room_id: room.id, sender_id: sender.id, dedupe_key: `room:${room.id}`,
       });
       void pokeBell(supabase, t.user_id);
     }
@@ -105,12 +109,8 @@ export async function notifyGame(
     const gameName = label[gameType] || 'a game';
     for (const m of (members || [])) {
       if (m.user_id === sender.id || m.muted) continue;
-      await supabase.from('notifications').insert({
-        user_id: m.user_id,
-        type: 'game',
-        title: `New game in ${room.name}! 🎮`,
-        body: `${displayName(sender, 'Someone')} started ${gameName} — come play!`,
-        data: { room_id: room.id, game_id: gameId, game_type: gameType },
+      await push(supabase, m.user_id, 'game', `New game in ${room.name}! 🎮`, `${displayName(sender, 'Someone')} started ${gameName} — come play!`, {
+        room_id: room.id, game_id: gameId, game_type: gameType, sender_id: sender.id, dedupe_key: `game:${gameId}`,
       });
       void pokeBell(supabase, m.user_id);
     }
@@ -123,12 +123,8 @@ export async function notifyFriendAccept(
   senderId: string,
 ): Promise<void> {
   try {
-    await supabase.from('notifications').insert({
-      user_id: senderId,
-      type: 'friend_accept',
-      title: 'Friend request accepted! 💕',
-      body: `${displayName(accepter, 'Your friend')} accepted your friend request ♡`,
-      data: { sender_id: accepter.id },
+    await push(supabase, senderId, 'friend_accept', 'Friend request accepted! 💕', `${displayName(accepter, 'Your friend')} accepted your friend request ♡`, {
+      sender_id: accepter.id, dedupe_key: `friend_accept:${accepter.id}`,
     });
     void pokeBell(supabase, senderId);
   } catch {}
