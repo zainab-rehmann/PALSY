@@ -498,7 +498,7 @@ export default function RoomPage() {
         {tab==='chat' && (
           <>
             <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-              {hasMore && (
+              {hasMore && messages.length > 0 && (
                 <div className="flex justify-center pb-1">
                   <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'rgba(255,255,255,0.9)',color:accentColor,border:`1px solid ${accentColor}33`}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
                 </div>
@@ -527,7 +527,7 @@ export default function RoomPage() {
                     {divider}
                   <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`} style={selected?{background:'rgba(255,255,255,0.6)',borderRadius:16}:undefined} onClick={selectMode && selectable ? ()=>toggleSelect(msg.id) : undefined}>
                     {selectMode && selectable && (
-                      <button onClick={()=>toggleSelect(msg.id)} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?accentColor:'rgba(0,0,0,0.25)',background:selected?accentColor:'transparent',color:'#fff'}}>
+                      <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?accentColor:'rgba(0,0,0,0.25)',background:selected?accentColor:'transparent',color:'#fff'}}>
                         {selected && <Check size={14}/>}
                       </button>
                     )}
