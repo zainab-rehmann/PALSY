@@ -11,6 +11,7 @@ import Link from 'next/link';
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
+import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
@@ -63,6 +64,8 @@ export default function DMPage() {
   const [highlightId, setHighlightId] = useState<string|null>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [jumpNote, setJumpNote] = useState('');
+  const [menuBelow, setMenuBelow] = useState(false);
+  const [starredLoading, setStarredLoading] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -259,6 +262,7 @@ export default function DMPage() {
         reply_to_id: replyTo?.id ?? null,
       });
       if (insertErr) setSendError("Couldn't send that file. Please try again.");
+      else void notifyDM(supabase, profile, friendId, type, file.name);
     } else {
       setSendError("Upload failed. Please try again.");
     }
@@ -298,6 +302,7 @@ export default function DMPage() {
           });
           setReplyTo(null);
           if (insertErr) setSendError("Couldn't send that voice message. Please try again.");
+          else void notifyDM(supabase, profile, friendId, 'audio', 'Voice message');
         }
         setUploading(false);
       };
@@ -368,6 +373,7 @@ export default function DMPage() {
     }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
+      void notifyDM(supabase, profile, friendId, 'text', text);
     } else {
       // Keep the message visible with a retry affordance — never silently lost.
       setMessages(m=>m.map(x=>x.id===tempId ? { ...x, failed: true } : x));
@@ -522,9 +528,9 @@ async function addReaction(msgId: string, emoji: string) {
 
   // Long-press (touch) opens the same menu as right-click
   const pressTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
-  function startPress(id: string) {
+  function startPress(id: string, clientY?: number) {
     if (pressTimer.current) clearTimeout(pressTimer.current);
-    pressTimer.current = setTimeout(()=>setReactionMsg(id), 450);
+    pressTimer.current = setTimeout(()=>{ setMenuBelow((clientY ?? 999) < 240); setReactionMsg(id); }, 450);
   }
   function endPress() {
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
@@ -553,9 +559,12 @@ async function addReaction(msgId: string, emoji: string) {
   async function togglePin(msg: Message) {
     setReactionMsg(null);
     const supabase = createClient();
-    const { error } = await supabase.rpc('set_message_pinned', { p_message_id: msg.id, p_pin: !msg.is_pinned });
+    const pinning = !msg.is_pinned;
+    const { error } = await supabase.rpc('set_message_pinned', { p_message_id: msg.id, p_pin: pinning });
     if (error) { setSendError("Couldn't change that pin. Please try again."); return; }
-    setMessages(m=>m.map(x=>x.id===msg.id ? { ...x, is_pinned: !msg.is_pinned, pinned_at: !msg.is_pinned ? new Date().toISOString() : null } : x));
+    const stamped = { ...msg, is_pinned: pinning, pinned_at: pinning ? new Date().toISOString() : null };
+    setMessages(m=>m.map(x=>x.id===msg.id ? stamped : x));
+    setPinnedList(prev => pinning ? [stamped, ...prev.filter(x=>x.id!==msg.id)] : prev.filter(x=>x.id!==msg.id));
   }
 
   async function toggleStar(msg: Message) {
@@ -574,14 +583,17 @@ async function addReaction(msgId: string, emoji: string) {
   async function openStarred() {
     setShowChatMenu(false);
     if (!profile) return;
+    setShowStarred(true);
+    setStarredLoading(true);
+    setStarredMessages([]);
     const supabase = createClient();
     const { data: rows } = await supabase.from('message_stars').select('message_id').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(200);
     const ids = (rows||[]).map((r:any)=>r.message_id);
-    if (!ids.length) { setStarredMessages([]); setShowStarred(true); return; }
+    if (!ids.length) { setStarredMessages([]); setStarredLoading(false); return; }
     const { data } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').in('id', ids).order('created_at', { ascending: false });
     const mine = (data||[]).filter((m:any)=> (m.sender_id===profile.id&&m.receiver_id===friendId)||(m.sender_id===friendId&&m.receiver_id===profile.id));
     setStarredMessages(mine as Message[]);
-    setShowStarred(true);
+    setStarredLoading(false);
   }
 
   // Jump to a message (from a quote, the pinned bar, or Starred): load
@@ -669,7 +681,7 @@ async function addReaction(msgId: string, emoji: string) {
         <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)'}}>{jumpNote} <button onClick={()=>setJumpNote('')} className="underline ml-1">Dismiss</button></div>
       )}
       {pinnedCurrent && (
-        <button onClick={()=>{ jumpToMessage(pinnedCurrent.id); setPinIndex(i=>i+1); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'var(--color-secondary)',borderBottom:'1px solid var(--color-border)'}}>
+        <button onClick={()=>{ const next = (pinIndex + 1) % pinnedList.length; setPinIndex(next); jumpToMessage(pinnedList[next].id); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'var(--color-secondary)',borderBottom:'1px solid var(--color-border)'}}>
           <Pin size={14} style={{color:'var(--color-accent)'}} className="flex-shrink-0"/>
           <span className="text-xs font-bold truncate" style={{color:'var(--color-text)'}}>{senderName(pinnedCurrent, pinnedCurrent.sender_id === profile?.id ? 'You' : 'Friend')}: <span className="font-normal" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(pinnedCurrent)}</span></span>
           {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:'var(--color-accent)'}}>{pinnedList.length} pinned · tap to cycle</span>}
@@ -719,8 +731,8 @@ async function addReaction(msgId: string, emoji: string) {
                     border: mine?undefined:'1px solid var(--color-border)',
                     borderRadius: mine?'20px 20px 4px 20px':'20px 20px 20px 4px',
                   }}
-                  onContextMenu={e=>{if(selectMode) return; e.preventDefault();setReactionMsg(msg.id);}}
-                  onTouchStart={()=>{if(!selectMode) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}
+                  onContextMenu={e=>{if(selectMode) return; e.preventDefault();setMenuBelow(e.clientY < 240);setReactionMsg(msg.id);}}
+                  onTouchStart={(e)=>{if(!selectMode) startPress(msg.id, e.touches[0]?.clientY);}} onTouchEnd={endPress} onTouchMove={endPress}
                   onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}
                 >
                   {msg.reply_to_id && (() => {
@@ -767,7 +779,7 @@ async function addReaction(msgId: string, emoji: string) {
                   {reactionMsg===msg.id && (
                     <>
                     <div className="fixed inset-0 z-[5]" onClick={()=>setReactionMsg(null)}/>
-                    <div className={`absolute bottom-full mb-1 ${mine?'right-0':'left-0'} flex flex-col gap-1 p-2 rounded-2xl z-10`} style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
+                    <div className={`absolute ${menuBelow?'top-full mt-1':'bottom-full mb-1'} ${mine?'right-0':'left-0'} flex flex-col gap-1 p-2 rounded-2xl z-10`} style={{background:'var(--color-surface)',boxShadow:'0 4px 20px rgba(0,0,0,0.1)',border:'1px solid var(--color-border)'}}>
                       <div className="flex gap-1" style={{flexWrap:'wrap',maxWidth:320}}>
                       {EMOJI_LIST.map(e=><button key={e} onClick={()=>addReaction(msg.id,e)} className="text-lg hover:scale-125 transition-transform">{e}</button>)}
                       <button onClick={()=>setReactionMsg(null)} className="text-xs p-1"><X size={12}/></button>
@@ -805,10 +817,10 @@ async function addReaction(msgId: string, emoji: string) {
                   {new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
                   {msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}
                   {mine && !msg.failed && (msg.read_at
-                    ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-accent)'}}><CheckCheck size={13}/> Seen</span>
+                    ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-accent)'}}><CheckCheck size={15}/> Seen</span>
                     : msg.delivered_at
-                      ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={13}/></span>
-                      : <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={13}/></span>)}
+                      ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span>
+                      : <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span>)}
                   {mine && msg.edited_at && <span className="ml-1 italic">· edited</span>}
                   {mine && <button onClick={()=>deleteMessage(msg.id)} className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{color:'#FF6B6B'}}>Delete</button>}
                 </span>
@@ -947,7 +959,9 @@ async function addReaction(msgId: string, emoji: string) {
               <p className="font-black text-sm theme-text flex-1">Starred messages</p>
               <button onClick={()=>setShowStarred(false)} className="p-1.5 rounded-full" style={{background:'var(--color-secondary)'}}><X size={14}/></button>
             </div>
-            {starredMessages.length===0 ? (
+            {starredLoading ? (
+              <p className="text-sm text-center py-6" style={{color:'var(--color-text-muted)'}}>Loading your stars… ♡</p>
+            ) : starredMessages.length===0 ? (
               <p className="text-sm text-center py-6" style={{color:'var(--color-text-muted)'}}>No starred messages yet.<br/>Hold a message and tap Star ⭐ to keep it here — only you can see your stars.</p>
             ) : starredMessages.map(m=>(
               <button key={m.id} onClick={()=>{setShowStarred(false); jumpToMessage(m.id);}} className="w-full text-left px-3 py-2.5 rounded-2xl mb-1.5" style={{background:'var(--color-secondary)'}}>
