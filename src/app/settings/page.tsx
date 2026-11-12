@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
-import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock } from 'lucide-react';
+import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell } from 'lucide-react';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -19,7 +19,10 @@ export default function SettingsPage() {
   const [newPw, setNewPw] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [pwSaving, setPwSaving] = useState(false);
-  const [tab, setTab] = useState<'profile'|'appearance'|'account'>('profile');
+  const [tab, setTab] = useState<'profile'|'appearance'|'notifications'|'account'>('profile');
+  const [notifEnabled, setNotifEnabled] = useState(true);
+  const [notifSaved, setNotifSaved] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<string>('unsupported');
 
   useEffect(() => {
     (async () => {
@@ -32,10 +35,31 @@ export default function SettingsPage() {
       setDisplayName(prof.display_name||'');
       setBio(prof.bio||'');
       setTheme(prof.theme||'blue');
+      setNotifEnabled(prof.notifications_enabled !== false);
       document.documentElement.setAttribute('data-theme', prof.theme||'blue');
       setLoading(false);
     })();
   }, [router]);
+
+  useEffect(() => {
+    if ('Notification' in window) setNotifPermission(Notification.permission);
+  }, [tab]);
+
+  async function toggleNotifEnabled() {
+    if (!profile) return;
+    const next = !notifEnabled;
+    setNotifEnabled(next);
+    const supabase = createClient();
+    await supabase.from('profiles').update({ notifications_enabled: next }).eq('id', profile.id);
+    setNotifSaved(true);
+    setTimeout(() => setNotifSaved(false), 2500);
+  }
+
+  async function askNotifPermission() {
+    if (!('Notification' in window)) return;
+    const result = await Notification.requestPermission().catch(() => 'denied' as NotificationPermission);
+    setNotifPermission(result);
+  }
 
   async function saveProfile() {
     if (!profile) return;
@@ -91,11 +115,11 @@ export default function SettingsPage() {
 
           {/* Tabs */}
           <div className="flex gap-2 p-1 rounded-2xl" style={{background:'var(--color-secondary)'}}>
-            {(['profile','appearance','account'] as const).map(t=>(
+            {(['profile','appearance','notifications','account'] as const).map(t=>(
               <button key={t} onClick={()=>setTab(t)}
                 className="flex-1 py-2 rounded-xl text-sm font-bold capitalize transition-all"
                 style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?'var(--color-accent)':'var(--color-text-muted)',boxShadow:tab===t?'0 2px 8px var(--color-primary-alpha)':undefined}}>
-                {t==='profile'?'👤 Profile':t==='appearance'?'🎨 Theme':'🔒 Account'}
+                {t==='profile'?'👤 Profile':t==='appearance'?'🎨 Theme':t==='notifications'?'🔔 Alerts':'🔒 Account'}
               </button>
             ))}
           </div>
@@ -139,6 +163,49 @@ export default function SettingsPage() {
                 </div>
               </div>
               <button onClick={saveProfile} disabled={saving} className="theme-btn w-full py-3 text-sm">{saved?'Theme Applied! ♡':saving?'Applying...':'Apply Theme'}</button>
+            </div>
+          )}
+
+          {tab==='notifications' && (
+            <div className="space-y-4">
+              <div className="theme-card p-6 space-y-4">
+                <p className="font-bold theme-text flex items-center gap-2"><Bell size={16} style={{color:'var(--color-accent)'}}/>Pop-up notifications</p>
+                <div className="flex items-center gap-3">
+                  <button type="button" role="switch" aria-checked={notifEnabled} onClick={toggleNotifEnabled}
+                    className="relative flex-shrink-0 rounded-full transition-all"
+                    style={{width:52,height:30,background:notifEnabled?'var(--color-accent)':'var(--color-border)'}}>
+                    <span className="absolute top-1 rounded-full bg-white transition-all" style={{width:22,height:22,left:notifEnabled?27:3,boxShadow:'0 1px 4px rgba(0,0,0,0.25)'}}/>
+                  </button>
+                  <div>
+                    <p className="font-bold text-sm theme-text">{notifEnabled ? 'Pop-ups on ♡' : 'Pop-ups off'}</p>
+                    <p className="text-xs" style={{color:'var(--color-text-muted)'}}>
+                      {notifEnabled ? 'You will get a little pop-up on this device when a message or friend news arrives.' : 'No pop-ups. Your bell in the navigation still shows everything.'}
+                    </p>
+                  </div>
+                </div>
+                {notifSaved && <p className="text-xs font-bold" style={{color:'var(--color-accent)'}}>Saved ♡</p>}
+                <div className="pt-3" style={{borderTop:'1px solid var(--color-border)'}}>
+                  <p className="text-xs font-bold mb-1" style={{color:'var(--color-text-muted)'}}>Browser permission on this device</p>
+                  {notifPermission === 'granted' && <p className="text-sm theme-text">✅ Pop-ups are allowed on this device ♡</p>}
+                  {notifPermission === 'default' && (
+                    <div className="flex items-center gap-3">
+                      <p className="text-sm theme-text flex-1">Not decided yet — turn pop-ups on to be asked.</p>
+                      <button onClick={askNotifPermission} className="theme-btn px-3 py-2 rounded-xl text-xs font-bold">Turn on</button>
+                    </div>
+                  )}
+                  {notifPermission === 'denied' && (
+                    <div>
+                      <p className="text-sm theme-text">🚫 Pop-ups are blocked for this site in this browser.</p>
+                      <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>Tap the lock (or tune) icon in your browser&apos;s address bar → Site settings → Notifications → Allow, then come back and tap Check again.</p>
+                      <button onClick={()=>{ if ('Notification' in window) setNotifPermission(Notification.permission); }} className="theme-btn px-3 py-2 rounded-xl text-xs font-bold mt-2">Check again</button>
+                    </div>
+                  )}
+                  {notifPermission === 'unsupported' && <p className="text-sm theme-text">This browser doesn&apos;t support pop-up notifications — the bell still works.</p>}
+                </div>
+                <p className="text-xs pt-3" style={{color:'var(--color-text-muted)',borderTop:'1px solid var(--color-border)'}}>
+                  Muted rooms never pop up and never add bell noise. You can mute or unmute a room in its Settings tab. The bell always keeps your latest notifications, even with pop-ups off.
+                </p>
+              </div>
             </div>
           )}
 
