@@ -44,7 +44,6 @@ function MobileNav({ active }: { active: string }) {
             <span className="text-xs font-semibold">{label}</span>
           </Link>
         ))}
-        <NotificationBell variant="navItem"/>
       </div>
     </nav>
   );
