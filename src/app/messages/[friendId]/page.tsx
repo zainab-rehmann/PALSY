@@ -5,11 +5,13 @@ import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
+import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName } from '@/lib/chatTools';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉'];
 
@@ -40,6 +42,15 @@ export default function DMPage() {
   const recordIntervalRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const lastMsgIdRef = useRef<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showChatMenu, setShowChatMenu] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'clear' | 'deleteSelected' | null>(null);
+  const [sendError, setSendError] = useState('');
 
   useEffect(() => {
     const supabase = createClient();
@@ -55,14 +66,18 @@ export default function DMPage() {
       const { data: fr } = await supabase.from('profiles').select('*').eq('id', friendId).single();
       setFriend(fr);
 
-      // Load messages
+      // Load messages — NEWEST first, then display oldest-to-newest.
+      // (The old query loaded the OLDEST 100, so recent messages vanished
+      // after reload in any long chat.)
       const { data: msgs } = await supabase.from('messages')
         .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
         .eq('is_deleted', false)
-        .order('created_at', { ascending: true })
-        .limit(100);
-      setMessages(msgs||[]);
+        .order('created_at', { ascending: false })
+        .limit(CHAT_PAGE_SIZE);
+      const ordered = [...(msgs||[])].reverse();
+      setMessages(ordered);
+      setHasMore((msgs||[]).length === CHAT_PAGE_SIZE);
       setLoading(false);
 
       // Chat is open -> everything from this friend counts as read
@@ -82,12 +97,21 @@ export default function DMPage() {
               await supabase.from('messages').update({ read_at: now, delivered_at: now }).eq('id', full.id);
               full.read_at = now; full.delivered_at = now;
             }
-            if (full) setMessages(m=>[...m, full]);
+            // Dedupe: my own message may already be here via optimistic send.
+            if (full) setMessages(m=> m.some(x=>x.id===full.id) ? m : [...m, full]);
           }
         })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
           const upd = payload.new as Message;
-          setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, delivered_at: upd.delivered_at, read_at: upd.read_at } : x));
+          if (upd.is_deleted) {
+            setMessages(m=>m.filter(x=>x.id!==upd.id));
+          } else {
+            setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, delivered_at: upd.delivered_at, read_at: upd.read_at, content: upd.content, edited_at: upd.edited_at } : x));
+          }
+        })
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
+          const old = payload.old as Message;
+          if (old?.id) setMessages(m=>m.filter(x=>x.id!==old.id));
         })
         .subscribe();
 
@@ -127,7 +151,15 @@ export default function DMPage() {
     return () => { liveChannels.forEach(c => { try { supabase.removeChannel(c); } catch {} }); };
   }, [router, friendId]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  // Scroll to bottom only when the newest message changes (a new arrival
+  // or the first load) — never when older history is prepended.
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last && last.id !== lastMsgIdRef.current) {
+      lastMsgIdRef.current = last.id;
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   // Presence refresh: realtime can lag or drop, so re-read the friend's
   // status every 10s. The re-render is also what flips Online to
@@ -157,13 +189,16 @@ export default function DMPage() {
       else if (file.type.startsWith('video/')) type = 'video';
       else if (file.type.startsWith('audio/')) type = 'audio';
 
-      await supabase.from('messages').insert({
+      const { error: insertErr } = await supabase.from('messages').insert({
         sender_id: profile.id,
         receiver_id: friendId,
         content: file.name,
         media_url: publicUrl,
         type,
       });
+      if (insertErr) setSendError("Couldn't send that file. Please try again.");
+    } else {
+      setSendError("Upload failed. Please try again.");
     }
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -190,13 +225,14 @@ export default function DMPage() {
         const { data, error } = await supabase.storage.from('media').upload(fileName, audioBlob, { contentType: 'audio/webm' });
         if (!error && data && profile) {
           const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
-          await supabase.from('messages').insert({
+          const { error: insertErr } = await supabase.from('messages').insert({
             sender_id: profile.id,
             receiver_id: friendId,
             content: 'Voice message',
             media_url: publicUrl,
             type: 'audio',
           });
+          if (insertErr) setSendError("Couldn't send that voice message. Please try again.");
         }
         setUploading(false);
       };
@@ -230,6 +266,7 @@ export default function DMPage() {
     if (!input.trim() || !profile || sending) return;
     setShowEmojis(false);
     setSending(true);
+    setSendError('');
     const supabase = createClient();
     if (editing) {
       const now = new Date().toISOString();
@@ -240,16 +277,135 @@ export default function DMPage() {
         setMessages(m=>m.map(x=>x.id===editing.id ? { ...x, content: input.trim(), edited_at: now } : x));
         setEditing(null);
         setInput('');
+      } else {
+        setSendError("Couldn't save that edit. Please try again.");
       }
       setSending(false);
       return;
     }
-    const { error } = await supabase.from('messages').insert({
+    const text = input.trim();
+    // Optimistic: show the message instantly instead of waiting on realtime.
+    const tempId = `temp-${Date.now()}`;
+    const temp: Message = {
+      id: tempId, room_id: null, sender_id: profile.id, receiver_id: friendId,
+      content: text, media_url: null, delivered_at: null, read_at: null,
+      edited_at: null, type: 'text', is_deleted: false, reply_to: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      sender: profile, reactions: [],
+    };
+    setMessages(m=>[...m, temp]);
+    setInput('');
+    const { data, error } = await supabase.from('messages').insert({
       sender_id: profile.id, receiver_id: friendId,
-      content: input.trim(), type: 'text'
-    });
-    if (!error) setInput('');
+      content: text, type: 'text'
+    }).select().single();
+    if (!error && data) {
+      setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
+    } else {
+      // Keep the message visible with a retry affordance — never silently lost.
+      setMessages(m=>m.map(x=>x.id===tempId ? { ...x, failed: true } : x));
+      setSendError("Message couldn't be sent. Tap it to retry.");
+    }
     setSending(false);
+  }
+
+  async function retrySend(tempId: string) {
+    const msg = messages.find(m=>m.id===tempId);
+    if (!msg || !profile || !msg.content) return;
+    setSendError('');
+    const supabase = createClient();
+    const { data, error } = await supabase.from('messages').insert({
+      sender_id: profile.id, receiver_id: friendId,
+      content: msg.content, type: 'text'
+    }).select().single();
+    if (!error && data) {
+      setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
+    } else {
+      setSendError("Still couldn't send. Check your connection and try again.");
+    }
+  }
+
+  // Load an older page of history, keeping the scroll position steady.
+  async function loadOlder() {
+    if (loadingOlder || !messages.length || !profile) return;
+    setLoadingOlder(true);
+    const supabase = createClient();
+    const oldest = messages[0].created_at;
+    const el = listRef.current;
+    const prevHeight = el ? el.scrollHeight : 0;
+    const { data } = await supabase.from('messages')
+      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+      .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
+      .eq('is_deleted', false)
+      .lt('created_at', oldest)
+      .order('created_at', { ascending: false })
+      .limit(CHAT_PAGE_SIZE);
+    const older = [...(data||[])].reverse();
+    setMessages(m=>[...older, ...m]);
+    setHasMore((data||[]).length === CHAT_PAGE_SIZE);
+    setLoadingOlder(false);
+    requestAnimationFrame(() => {
+      if (el) el.scrollTop = el.scrollHeight - prevHeight;
+    });
+  }
+
+  // --- Chat menu actions: export / clear / multi-select delete ---
+
+  async function exportChat() {
+    if (!profile) return;
+    setShowChatMenu(false);
+    const supabase = createClient();
+    const all: Message[] = [];
+    const PAGE = 200;
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await supabase.from('messages')
+        .select('*,sender:profiles!sender_id(*)')
+        .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
+        .order('created_at', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (!data || data.length === 0) break;
+      all.push(...(data as Message[]));
+      if (data.length < PAGE) break;
+    }
+    const title = `Chat with ${friend?.display_name || friend?.username || 'friend'}`;
+    const text = buildTranscript(title, all, (m) => senderName(m, m.sender_id === profile.id ? 'You' : 'Friend'));
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTextFile(`palsy-chat-${friend?.username || 'friend'}-${stamp}.txt`, text);
+  }
+
+  async function clearChat() {
+    if (!profile) return;
+    const supabase = createClient();
+    await supabase.from('messages').delete()
+      .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`);
+    setMessages([]);
+    setHasMore(false);
+    setConfirmAction(null);
+  }
+
+  async function deleteSelected() {
+    if (!profile || selectedIds.size === 0) return;
+    const supabase = createClient();
+    const ids = [...selectedIds];
+    await supabase.from('messages').delete().in('id', ids);
+    setMessages(m=>m.filter(x=>!selectedIds.has(x.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setConfirmAction(null);
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function refreshReactions(msgId: string) {
+    const supabase = createClient();
+    const { data } = await supabase.from('message_reactions').select('*').eq('message_id', msgId);
+    setMessages(m=>m.map(x=>x.id===msgId ? { ...x, reactions: data||[] } : x));
   }
 
   // Tap a reaction chip you already added to remove it; otherwise add it.
@@ -262,23 +418,13 @@ export default function DMPage() {
     } else {
       await supabase.from('message_reactions').upsert({ message_id: msgId, user_id: profile!.id, emoji });
     }
-    // Reload messages
-    const { data: msgs } = await supabase.from('messages')
-      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
-      .or(`and(sender_id.eq.${profile!.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile!.id})`)
-      .order('created_at', { ascending: true }).limit(100);
-    setMessages(msgs||[]);
+    await refreshReactions(msgId);
   }
 async function addReaction(msgId: string, emoji: string) {
     const supabase = createClient();
     await supabase.from('message_reactions').upsert({ message_id: msgId, user_id: profile!.id, emoji });
     setReactionMsg(null);
-    // Reload messages
-    const { data: msgs } = await supabase.from('messages')
-      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
-      .or(`and(sender_id.eq.${profile!.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile!.id})`)
-      .order('created_at', { ascending: true }).limit(100);
-    setMessages(msgs||[]);
+    await refreshReactions(msgId);
   }
 
   async function deleteMessage(msgId: string) {
@@ -314,21 +460,51 @@ async function addReaction(msgId: string, emoji: string) {
   return (
     <div className="flex flex-col h-screen theme-bg">
       {/* Header */}
+      {selectMode ? (
+        <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)'}}>
+          <button onClick={()=>{setSelectMode(false); setSelectedIds(new Set());}} className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><X size={18} style={{color:'var(--color-accent)'}}/></button>
+          <p className="font-black text-sm theme-text flex-1">{selectedIds.size} selected</p>
+          <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-')).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}>Select all</button>
+          <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#FF6B6B',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
+        </header>
+      ) : (
       <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)'}}>
         <Link href="/messages" className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><ArrowLeft size={18} style={{color:'var(--color-accent)'}}/></Link>
         {friend && (
           <>
             <div className="relative"><Avatar profile={friend} size={38}/><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{background:isFreshOnline(friend)?'#4ADE80':'#9CA3AF'}}/></div>
-            <div>
+            <div className="flex-1 min-w-0">
               <p className="font-black text-sm theme-text">{friend.display_name||friend.username}</p>
               <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{friendTyping ? 'typing…' : friendInChat ? 'In this chat 💬' : isFreshOnline(friend) ? '🟢 Online' : presenceLabel(friend)}</p>
             </div>
           </>
         )}
+        <div className="relative">
+          <button onClick={()=>setShowChatMenu(v=>!v)} className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}} title="Chat options"><MoreVertical size={18} style={{color:'var(--color-accent)'}}/></button>
+          {showChatMenu && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={()=>setShowChatMenu(false)}/>
+              <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl p-2 z-40 space-y-1" style={{background:'var(--color-surface)',border:'1px solid var(--color-border)',boxShadow:'0 8px 30px rgba(0,0,0,0.12)'}}>
+                <button onClick={exportChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:'var(--color-accent)'}}/> Export chat</button>
+                <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:'var(--color-accent)'}}/> Select messages</button>
+                <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'#FF6B6B'}}><Trash2 size={16}/> Clear chat</button>
+              </div>
+            </>
+          )}
+        </div>
       </header>
+      )}
+      {sendError && (
+        <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,107,107,0.12)',color:'#FF6B6B'}}>{sendError} <button onClick={()=>setSendError('')} className="underline ml-1">Dismiss</button></div>
+      )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {hasMore && (
+          <div className="flex justify-center pb-1">
+            <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-accent)',border:'1px solid var(--color-border)'}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
+          </div>
+        )}
         {messages.map((msg, i)=>{
           const mine = msg.sender_id === profile?.id;
           // WhatsApp-style day divider: Today / Yesterday / full date.
@@ -346,10 +522,16 @@ async function addReaction(msgId: string, emoji: string) {
               </div>
             </Fragment>
           );
+          const selected = selectedIds.has(msg.id);
           return (
             <Fragment key={msg.id}>
               {divider}
-            <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`}>
+            <div className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'} ${selected?'rounded-2xl':''}`} style={selected?{background:'var(--color-secondary)'}:undefined} onClick={selectMode ? ()=>toggleSelect(msg.id) : undefined}>
+              {selectMode && (
+                <button onClick={()=>toggleSelect(msg.id)} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?'var(--color-accent)':'var(--color-border)',background:selected?'var(--color-accent)':'transparent',color:'#fff'}}>
+                  {selected && <Check size={14}/>}
+                </button>
+              )}
               {!mine && <Avatar profile={(msg.sender as Profile)||{}} size={28}/>}
               <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-1`}>
                 <div
@@ -359,8 +541,9 @@ async function addReaction(msgId: string, emoji: string) {
                     border: mine?undefined:'1px solid var(--color-border)',
                     borderRadius: mine?'20px 20px 4px 20px':'20px 20px 20px 4px',
                   }}
-                  onContextMenu={e=>{e.preventDefault();setReactionMsg(msg.id);}}
-                  onTouchStart={()=>startPress(msg.id)} onTouchEnd={endPress} onTouchMove={endPress}
+                  onContextMenu={e=>{if(selectMode) return; e.preventDefault();setReactionMsg(msg.id);}}
+                  onTouchStart={()=>{if(!selectMode) startPress(msg.id);}} onTouchEnd={endPress} onTouchMove={endPress}
+                  onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}
                 >
                   {/* Media Content */}
                   {msg.type === 'image' && msg.media_url && (
@@ -414,7 +597,8 @@ async function addReaction(msgId: string, emoji: string) {
                 )}
                 <span className="text-xs" style={{color:'var(--color-text-muted)'}}>
                   {new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
-                  {mine && (msg.read_at
+                  {msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}
+                  {mine && !msg.failed && (msg.read_at
                     ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-accent)'}}><CheckCheck size={13}/> Seen</span>
                     : msg.delivered_at
                       ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={13}/></span>
@@ -522,6 +706,24 @@ async function addReaction(msgId: string, emoji: string) {
             <Send size={16}/>
           </button>
         </form>
+      )}
+      {confirmAction === 'clear' && (
+        <ConfirmDialog
+          title="Clear this chat?"
+          message="This will delete all messages in this chat for you and your friend. This cannot be undone."
+          confirmLabel="Clear chat"
+          onConfirm={clearChat}
+          onCancel={()=>setConfirmAction(null)}
+        />
+      )}
+      {confirmAction === 'deleteSelected' && (
+        <ConfirmDialog
+          title={`Delete ${selectedIds.size} message${selectedIds.size===1?'':'s'}?`}
+          message="These messages will be deleted for everyone in this chat. This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={deleteSelected}
+          onCancel={()=>setConfirmAction(null)}
+        />
       )}
       <style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style>
     </div>
