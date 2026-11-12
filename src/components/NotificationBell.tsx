@@ -17,6 +17,14 @@ export default function NotificationBell({ variant }: { variant: 'icon' | 'navRo
   const [open, setOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
+  // Escape closes the panel (the backdrop click already does).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open ]);
+
   const load = useCallback(async () => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
