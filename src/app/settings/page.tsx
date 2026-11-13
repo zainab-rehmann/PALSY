@@ -1,11 +1,12 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
-import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell, Globe } from 'lucide-react';
+import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell, Globe, ImagePlus, Check } from 'lucide-react';
+import { WALLPAPERS, wallpaperStyle, isCustomWallpaper } from '@/lib/wallpapers';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -17,6 +18,9 @@ export default function SettingsPage() {
   const [usernameMsg, setUsernameMsg] = useState('');
   const [bio, setBio] = useState('');
   const [theme, setTheme] = useState<'blue'|'pink'>('blue');
+  const [wallpaper, setWallpaper] = useState<string>('default');
+  const [uploadingWallpaper, setUploadingWallpaper] = useState(false);
+  const wallpaperInputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [newPw, setNewPw] = useState('');
@@ -41,6 +45,7 @@ export default function SettingsPage() {
       setUsername(prof.username||'');
       setBio(prof.bio||'');
       setTheme(prof.theme||'blue');
+      setWallpaper(prof.wallpaper||'default');
       setNotifEnabled(prof.notifications_enabled !== false);
       setIsPrivate(prof.is_private === true);
       document.documentElement.setAttribute('data-theme', prof.theme||'blue');
@@ -117,7 +122,7 @@ export default function SettingsPage() {
     }
     setSaving(true);
     const supabase = createClient();
-    const updates: Record<string, unknown> = { display_name: displayName, bio, theme, updated_at: new Date().toISOString() };
+    const updates: Record<string, unknown> = { display_name: displayName, bio, theme, wallpaper, updated_at: new Date().toISOString() };
     if (usernameChanged) updates.username = u;
     const { error } = await supabase.from('profiles').update(updates).eq('id', profile.id);
     if (error) {
@@ -136,6 +141,24 @@ export default function SettingsPage() {
     }
     document.documentElement.setAttribute('data-theme', theme);
     setSaving(false); setSaved(true); setTimeout(()=>setSaved(false),2000);
+  }
+
+  async function uploadWallpaper(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !profile) return;
+    setUploadingWallpaper(true);
+    const supabase = createClient();
+    const ext = file.name.split('.').pop() || 'jpg';
+    const path = `${profile.id}/wallpaper-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('media').upload(path, file, { upsert: true });
+    if (!error) {
+      const { data: pub } = supabase.storage.from('media').getPublicUrl(path);
+      setWallpaper(pub.publicUrl);
+    } else {
+      alert('Upload failed. Please try again.');
+    }
+    setUploadingWallpaper(false);
+    if (wallpaperInputRef.current) wallpaperInputRef.current.value = '';
   }
 
   async function changePassword() {
@@ -238,6 +261,38 @@ export default function SettingsPage() {
                       </div>
                     </button>
                   ))}
+                </div>
+              </div>
+              {/* Chat wallpaper — your own, only you see it */}
+              <div>
+                <p className="font-bold mb-1 theme-text">Chat wallpaper ♡</p>
+                <p className="text-xs mb-3" style={{color:'var(--color-text-muted)'}}>Your own chat background, only you see it. Tap one to preview it below, then Apply.</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {WALLPAPERS.map(w=>(
+                    <button key={w.id} onClick={()=>setWallpaper(w.id)} className="rounded-2xl overflow-hidden border-2 transition-all" style={{borderColor: wallpaper===w.id?'var(--color-accent)':'transparent', transform: wallpaper===w.id?'scale(1.03)':'scale(1)'}}>
+                      <div className="h-16 p-2 flex flex-col justify-end gap-1" style={w.id==='default' ? {background:'var(--color-secondary)'} : w.style}>
+                        <div className="self-start px-2 py-0.5 rounded-full text-[10px] font-bold" style={{background:'rgba(255,255,255,0.9)',color:'var(--color-text-muted)'}}>hi ♡</div>
+                        <div className="self-end px-2 py-0.5 rounded-full text-[10px] font-bold" style={{background:'var(--color-bubble-mine)',color:'var(--color-text)'}}>hello!</div>
+                      </div>
+                      <p className="text-[11px] font-bold py-1.5 flex items-center justify-center gap-1 theme-text">{w.emoji} {w.name}{wallpaper===w.id && <Check size={12} style={{color:'var(--color-accent)'}}/>}</p>
+                    </button>
+                  ))}
+                  {/* Custom upload */}
+                  <button onClick={()=>wallpaperInputRef.current?.click()} disabled={uploadingWallpaper} className="rounded-2xl overflow-hidden border-2 transition-all" style={{borderColor: isCustomWallpaper(wallpaper)?'var(--color-accent)':'var(--color-border)', borderStyle:'dashed'}}>
+                    <div className="h-16 p-2 flex items-center justify-center" style={isCustomWallpaper(wallpaper) ? wallpaperStyle(wallpaper) : {background:'var(--color-secondary)'}}>
+                      {uploadingWallpaper ? <span className="text-[11px] font-bold" style={{color:'var(--color-text-muted)'}}>Uploading…</span> : <ImagePlus size={22} style={{color:'var(--color-accent)'}}/>}
+                    </div>
+                    <p className="text-[11px] font-bold py-1.5 theme-text">🖼️ Your photo{isCustomWallpaper(wallpaper) && <Check size={12} className="inline ml-1" style={{color:'var(--color-accent)'}}/>}</p>
+                  </button>
+                </div>
+                <input ref={wallpaperInputRef} type="file" accept="image/*" className="hidden" onChange={uploadWallpaper}/>
+                {/* Live preview */}
+                <div className="mt-4 rounded-2xl overflow-hidden" style={{border:'1px solid var(--color-border)'}}>
+                  <div className="px-4 py-3 space-y-2" style={wallpaperStyle(wallpaper)}>
+                    <div className="flex"><span className="px-3 py-2 rounded-2xl text-xs" style={{background:'var(--color-bubble-other)',border:'1px solid var(--color-border)'}}>This is how your chats will look ♡</span></div>
+                    <div className="flex justify-end"><span className="px-3 py-2 rounded-2xl text-xs" style={{background:'var(--color-bubble-mine)'}}>So cute! ✨</span></div>
+                    <div className="flex justify-center"><span className="text-[11px] font-bold px-3 py-1 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)',border:'1px solid var(--color-border)'}}>Today</span></div>
+                  </div>
                 </div>
               </div>
               <button onClick={saveProfile} disabled={saving} className="theme-btn w-full py-3 text-sm">{saved?'Theme Applied! ♡':saving?'Applying...':'Apply Theme'}</button>

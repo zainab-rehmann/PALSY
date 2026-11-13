@@ -18,6 +18,7 @@ import { notifyRoom, notifyGame } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import EntryCodePrompt from '@/components/EntryCodePrompt';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
+import { wallpaperStyle } from '@/lib/wallpapers';
 
 const PRESETS: Record<string,{bg:string;accent:string;emoji:string}> = {
   'cloudy-blue':{bg:'#DCEBFF',accent:'#7CA8E8',emoji:'☁️'},
@@ -769,7 +770,8 @@ export default function RoomPage() {
                 {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:accentColor}}>{pinnedList.length} pinned · tap to cycle</span>}
               </button>
             )}
-            <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+            {/* Messages — my own wallpaper, only I see it */}
+            <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper)}>
               {hasMore && messages.length > 0 && (
                 <div className="flex justify-center pb-1">
                   <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'rgba(255,255,255,0.9)',color:accentColor,border:`1px solid ${accentColor}33`}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>

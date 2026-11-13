@@ -8,6 +8,7 @@ export interface Profile {
   bio: string | null;
   avatar_url: string | null;
   theme: Theme;
+  wallpaper: string | null;
   notifications_enabled: boolean;
   is_private: boolean;
   is_online: boolean;
