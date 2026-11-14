@@ -9,6 +9,7 @@ import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell, Globe
 import { WALLPAPERS, wallpaperStyle, isCustomWallpaper } from '@/lib/wallpapers';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
 import { hasLockerCode, setLockerCode, removeLockerCode } from '@/lib/locker';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 const THEME_CHOICES: { id: Theme; label: string; emoji: string; bg: string; border: string; text: string; dots: string[] }[] = [
   { id: 'blue', label: 'Soft Blue', emoji: '💙', bg: '#DCEBFF', border: '#7CA8E8', text: '#34445C', dots: ['#A9C9F5', '#DCEBFF', '#7CA8E8'] },
@@ -45,6 +46,7 @@ export default function SettingsPage() {
   const [lockerMsg, setLockerMsg] = useState('');
   const [lockerBusy, setLockerBusy] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
+  const [showRemoveLocker, setShowRemoveLocker] = useState(false);
   const [forgotPw, setForgotPw] = useState('');
   const [forgotBusy, setForgotBusy] = useState(false);
 
@@ -190,7 +192,6 @@ export default function SettingsPage() {
   }
 
   async function removeLocker() {
-    if (!confirm('Remove your locker code? Your locked chats will become visible again.')) return;
     setLockerBusy(true);
     const supabase = createClient();
     const err = await removeLockerCode(supabase);
@@ -439,7 +440,7 @@ export default function SettingsPage() {
                     {lockerHasCode ? 'Change Code' : 'Set Code'}
                   </button>
                   {lockerHasCode && (
-                    <button onClick={removeLocker} disabled={lockerBusy} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+                    <button onClick={()=>setShowRemoveLocker(true)} disabled={lockerBusy} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
                       Remove Code
                     </button>
                   )}
@@ -477,6 +478,15 @@ export default function SettingsPage() {
         </div>
       </main>
       <MobileNav active="/settings"/>
+      {showRemoveLocker && (
+        <ConfirmDialog
+          title="Remove your locker code?"
+          message="Your locked chats will become visible again. You can set a new code any time."
+          confirmLabel="Remove"
+          onConfirm={()=>{ setShowRemoveLocker(false); void removeLocker(); }}
+          onCancel={()=>setShowRemoveLocker(false)}
+        />
+      )}
     </div>
   );
 }
