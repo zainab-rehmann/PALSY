@@ -86,19 +86,32 @@ export const WALLPAPERS: WallpaperPreset[] = [
 ];
 
 // Resolve a stored wallpaper value to the style for a chat background.
-// Custom uploads get a soft white wash so bubbles and text stay readable
-// over any photo.
-export function wallpaperStyle(value: string | null | undefined): CSSProperties {
+// Custom uploads get a soft wash so bubbles and text stay readable
+// over any photo. In dark mode (autumn theme) the wash is a dark
+// espresso tint instead, so light wallpapers don't glare.
+const DARK_WASH = 'rgba(36,24,17,0.55)';
+
+export function wallpaperStyle(value: string | null | undefined, dark = false): CSSProperties {
   if (!value || value === 'default') return {};
   if (value.startsWith('http://') || value.startsWith('https://')) {
+    const wash = dark ? DARK_WASH : 'rgba(255,255,255,0.62)';
     return {
-      backgroundImage: `linear-gradient(rgba(255,255,255,0.62), rgba(255,255,255,0.62)), url(${value})`,
+      backgroundImage: `linear-gradient(${wash}, ${wash}), url(${value})`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
     };
   }
   const preset = WALLPAPERS.find((w) => w.id === value);
-  return preset ? preset.style : {};
+  if (!preset) return {};
+  if (!dark) return preset.style;
+  const s = preset.style;
+  if (typeof s.background === 'string') {
+    return { ...s, background: `linear-gradient(${DARK_WASH}, ${DARK_WASH}), ${s.background}` };
+  }
+  if (typeof s.backgroundImage === 'string') {
+    return { ...s, backgroundImage: `linear-gradient(${DARK_WASH}, ${DARK_WASH}), ${s.backgroundImage}` };
+  }
+  return s;
 }
 
 export function isCustomWallpaper(value: string | null | undefined): boolean {
