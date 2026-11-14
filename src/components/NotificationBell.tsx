@@ -125,7 +125,16 @@ export default function NotificationBell({ variant }: { variant: 'icon' | 'navRo
           <div
             className={variant === 'navItem'
               ? 'fixed left-3 right-3 z-50 rounded-3xl p-3 max-h-[62vh] overflow-y-auto'
-              : 'absolute right-0 top-full mt-2 z-50 w-[360px] max-w-[92vw] rounded-3xl p-3 max-h-[70vh] overflow-y-auto'}
+              : variant === 'navRow'
+                // The sidebar is only 240px wide, so a right-aligned 360px
+                // panel would run off the left edge of the screen. Open it
+                // to the right of the sidebar instead.
+                ? 'absolute left-full top-0 ml-3 z-50 w-[360px] max-w-[92vw] rounded-3xl p-3 max-h-[70vh] overflow-y-auto'
+                // On phones a 360px panel right-aligned to the bell runs off
+                // the left edge (the bell sits ~64px from the screen's right
+                // edge). Pin it to the viewport with insets instead; on wider
+                // screens keep the dropdown under the bell.
+                : 'fixed left-4 right-4 top-[68px] z-50 rounded-3xl p-3 max-h-[70vh] overflow-y-auto md:absolute md:left-auto md:right-0 md:top-full md:mt-2 md:w-[360px] md:max-w-[92vw]'}
             style={{
               background: 'var(--color-surface)',
               border: '1px solid var(--color-border)',
