@@ -185,7 +185,7 @@ function RoomsContent() {
                 <ArrowRight size={16} style={{color:'var(--color-text-muted)', transform: lockedOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.2s'}}/>
               </button>
               {lockedOpen && !unlocked && (
-                <LockerPrompt error={lockerError} busy={lockerBusy} onSubmit={submitLockerCode} onCancel={()=>setLockedOpen(false)} />
+                <LockerPrompt error={lockerError} busy={lockerBusy} onSubmit={submitLockerCode} onCancel={()=>setLockedOpen(false)} title="Locked rooms 🔒" subtitle="Type your locker code to see your locked rooms. A wrong code shows nothing — your rooms stay hidden ♡" />
               )}
               {lockedOpen && unlocked && (
                 <div className="space-y-2">
