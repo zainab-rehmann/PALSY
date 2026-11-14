@@ -1479,8 +1479,9 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       })
       .subscribe();
     // Polling fallback: if realtime ever lags or drops, the live banner
-    // and any open game still refresh within a few seconds, so a waiting
-    // screen never looks stuck and results always appear.
+    // and any open game still refresh within a couple of seconds, so a
+    // waiting screen never looks stuck, results always appear, and a
+    // guesser never stares at a blank canvas for long.
     const poll = setInterval(async () => {
       if (cancelled) return;
       const { data } = await supabase.from('games').select('*').eq('room_id', roomId).neq('status','finished').order('created_at', { ascending: false }).limit(1);
@@ -1496,7 +1497,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
           refreshPlayers(openId);
         }
       }
-    }, 5000);
+    }, 2000);
     return () => { cancelled = true; clearInterval(poll); supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, profile?.id]);
@@ -2195,6 +2196,12 @@ function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpda
           <p className="text-sm mt-1 font-bold theme-text">Score — You: {myScore} · Them: {theirScore}</p>
           <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>{r.outcome === 'guessed' ? 'Guesser +10, drawer +5.' : 'No points this round.'}</p>
         </div>
+        {/* Show the final drawing on the round-end screen (read-only), so
+            both players can see what was drawn — the guesser never saw it
+            otherwise. The redraw effect paints this canvas from the synced
+            strokes, same as the playing canvas. */}
+        <canvas ref={canvasRef} width={600} height={400} className="w-full rounded-2xl"
+          style={{ background: '#FFFFFF', border: `2px solid ${accentColor}33` }} />
         <button onClick={advance} className="theme-btn px-6 py-3 text-sm" style={{background:accentColor}}>
           {lastRound ? 'See results 🏆' : 'Next round →'}
         </button>
