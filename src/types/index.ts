@@ -97,6 +97,18 @@ export interface MessageReaction {
   created_at: string;
 }
 
+// Per-member delivery/read receipt for a ROOM message (migration 015).
+// One row per (message, member): delivered_at when the member's open room
+// view received the message, read_at when they actually had the chat in
+// view. Ticks turn blue only when every other current member has read it.
+export interface MessageReceipt {
+  message_id: string;
+  user_id: string;
+  room_id: string;
+  delivered_at: string;
+  read_at: string | null;
+}
+
 export interface Notification {
   id: string;
   user_id: string;
