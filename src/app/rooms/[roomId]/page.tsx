@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
+import { useEffect, useState, useRef, useCallback, Fragment, type PointerEvent as RPointerEvent } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room, RoomMember, Message, Game } from '@/types';
@@ -1195,17 +1195,105 @@ export default function RoomPage() {
 }
 
 // ============================================================
-// GAMES TAB — All 4 games inline
+// GAMES TAB — All 6 games inline
 // Rules (Nov 2026): nothing can be played until BOTH players are
 // in, every game has a Restart, and Hangman / Number Guess start
 // with two choices — one player sets the secret, the other guesses.
-// ============================================================
+// Draw & Guess and Trivia Duel run on the same live state sync.
+
+// Draw & Guess word bank: every word is drawable — animals, food and
+// everyday things. The hint shown to the guesser is the category.
+const DRAW_WORDS: { w: string; hint: string }[] = [
+  { w: 'cat', hint: 'animal' }, { w: 'dog', hint: 'animal' }, { w: 'butterfly', hint: 'animal' },
+  { w: 'elephant', hint: 'animal' }, { w: 'fish', hint: 'animal' }, { w: 'bird', hint: 'animal' },
+  { w: 'rabbit', hint: 'animal' }, { w: 'lion', hint: 'animal' }, { w: 'turtle', hint: 'animal' },
+  { w: 'penguin', hint: 'animal' },
+  { w: 'pizza', hint: 'food' }, { w: 'banana', hint: 'food' }, { w: 'cupcake', hint: 'food' },
+  { w: 'apple', hint: 'food' }, { w: 'carrot', hint: 'food' }, { w: 'cake', hint: 'food' },
+  { w: 'strawberry', hint: 'food' }, { w: 'cookie', hint: 'food' },
+  { w: 'house', hint: 'thing' }, { w: 'car', hint: 'thing' }, { w: 'bicycle', hint: 'thing' },
+  { w: 'sun', hint: 'thing' }, { w: 'moon', hint: 'thing' }, { w: 'star', hint: 'thing' },
+  { w: 'umbrella', hint: 'thing' }, { w: 'key', hint: 'thing' }, { w: 'book', hint: 'thing' },
+  { w: 'balloon', hint: 'thing' }, { w: 'chair', hint: 'thing' }, { w: 'tree', hint: 'thing' },
+  { w: 'flower', hint: 'thing' }, { w: 'boat', hint: 'thing' }, { w: 'airplane', hint: 'thing' },
+  { w: 'guitar', hint: 'thing' }, { w: 'hat', hint: 'thing' }, { w: 'clock', hint: 'thing' },
+  { w: 'rainbow', hint: 'thing' }, { w: 'snowman', hint: 'thing' },
+];
+
+// Trivia Duel question bank: well-known, unambiguous facts only.
+// `answer` is the index of the correct option.
+const TRIVIA_BANK: { q: string; options: string[]; answer: number; cat: string }[] = [
+  { q: 'Which planet is known as the Red Planet?', options: ['Venus', 'Mars', 'Jupiter', 'Saturn'], answer: 1, cat: 'Science' },
+  { q: 'What is H2O commonly known as?', options: ['Salt', 'Oxygen', 'Water', 'Hydrogen'], answer: 2, cat: 'Science' },
+  { q: 'How many legs does a spider have?', options: ['6', '8', '10', '4'], answer: 1, cat: 'Science' },
+  { q: 'What force keeps us on the ground?', options: ['Magnetism', 'Friction', 'Inertia', 'Gravity'], answer: 3, cat: 'Science' },
+  { q: 'What is the chemical symbol for gold?', options: ['Au', 'Ag', 'Gd', 'Go'], answer: 0, cat: 'Science' },
+  { q: 'Which gas do plants absorb from the air?', options: ['Oxygen', 'Carbon dioxide', 'Nitrogen', 'Helium'], answer: 1, cat: 'Science' },
+  { q: 'How many continents are there on Earth?', options: ['5', '6', '7', '8'], answer: 2, cat: 'Science' },
+  { q: 'What is the largest organ of the human body?', options: ['Heart', 'Liver', 'Skin', 'Lung'], answer: 2, cat: 'Science' },
+  { q: 'At what temperature (Celsius) does water boil at sea level?', options: ['90', '80', '120', '100'], answer: 3, cat: 'Science' },
+  { q: 'Which animal is known as man\u2019s best friend?', options: ['Cat', 'Horse', 'Dog', 'Parrot'], answer: 2, cat: 'General Knowledge' },
+  { q: 'What does HTTP stand for?', options: ['High Transfer Text Protocol', 'HyperText Transfer Protocol', 'HyperText Transmission Process', 'Home Tool Transfer Protocol'], answer: 1, cat: 'Tech' },
+  { q: 'In which year was the first iPhone released?', options: ['2005', '2007', '2009', '2010'], answer: 1, cat: 'Tech' },
+  { q: 'Who co-founded Microsoft with Bill Gates?', options: ['Steve Jobs', 'Jeff Bezos', 'Paul Allen', 'Elon Musk'], answer: 2, cat: 'Tech' },
+  { q: 'What does CPU stand for?', options: ['Computer Personal Unit', 'Central Program Utility', 'Core Processing Unit', 'Central Processing Unit'], answer: 3, cat: 'Tech' },
+  { q: 'Which company makes the Android operating system?', options: ['Apple', 'Samsung', 'Google', 'Microsoft'], answer: 2, cat: 'Tech' },
+  { q: 'What does "www" stand for?', options: ['World Web Window', 'Wide World Web', 'Web World Wide', 'World Wide Web'], answer: 3, cat: 'Tech' },
+  { q: 'Which language is used to style web pages?', options: ['HTML', 'Python', 'CSS', 'SQL'], answer: 2, cat: 'Tech' },
+  { q: 'How many bits are in one byte?', options: ['4', '16', '8', '32'], answer: 2, cat: 'Tech' },
+  { q: 'What is the capital of France?', options: ['London', 'Berlin', 'Paris', 'Madrid'], answer: 2, cat: 'General Knowledge' },
+  { q: 'How many days are there in a leap year?', options: ['365', '366', '364', '367'], answer: 1, cat: 'General Knowledge' },
+  { q: 'Which is the largest ocean on Earth?', options: ['Atlantic', 'Indian', 'Arctic', 'Pacific'], answer: 3, cat: 'General Knowledge' },
+  { q: 'How many sides does a hexagon have?', options: ['5', '7', '6', '8'], answer: 2, cat: 'General Knowledge' },
+  { q: 'What is the largest hot desert in the world?', options: ['Gobi', 'Sahara', 'Arabian', 'Kalahari'], answer: 1, cat: 'General Knowledge' },
+  { q: 'Which country is home to the kangaroo?', options: ['India', 'Brazil', 'Australia', 'Kenya'], answer: 2, cat: 'General Knowledge' },
+  { q: 'How many minutes are in 2 hours?', options: ['60', '90', '180', '120'], answer: 3, cat: 'General Knowledge' },
+  { q: 'What colour do you get by mixing blue and yellow paint?', options: ['Purple', 'Orange', 'Green', 'Brown'], answer: 2, cat: 'General Knowledge' },
+  { q: 'Which movie features a ship called the Titanic?', options: ['Avatar', 'Titanic', 'Jaws', 'Moana'], answer: 1, cat: 'Movies' },
+  { q: 'Who directed the movie "Jaws"?', options: ['Christopher Nolan', 'James Cameron', 'Steven Spielberg', 'Quentin Tarantino'], answer: 2, cat: 'Movies' },
+  { q: 'Which animated film features a snowman named Olaf?', options: ['Moana', 'Tangled', 'Frozen', 'Brave'], answer: 2, cat: 'Movies' },
+  { q: 'What is the name of the cowboy in Toy Story?', options: ['Buzz', 'Rex', 'Woody', 'Slinky'], answer: 2, cat: 'Movies' },
+  { q: 'Which movie is about a lion cub named Simba?', options: ['Madagascar', 'The Lion King', 'Zootopia', 'Bambi'], answer: 1, cat: 'Movies' },
+  { q: 'In which movie would you hear "May the Force be with you"?', options: ['Star Trek', 'Avatar', 'Dune', 'Star Wars'], answer: 3, cat: 'Movies' },
+];
+
+function shuffled<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Replay one drawing stroke onto a canvas context.
+function drawStrokeOn(ctx: CanvasRenderingContext2D, s: any) {
+  const pts: number[][] = s.points || [];
+  if (pts.length === 0) return;
+  ctx.strokeStyle = s.color;
+  ctx.fillStyle = s.color;
+  ctx.lineWidth = s.size || 6;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (pts.length === 1) {
+    ctx.beginPath();
+    ctx.arc(pts[0][0], pts[0][1], (s.size || 6) / 2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.stroke();
+}
 
 function initialStateFor(type: string, creatorId: string): any {
   if (type === 'tictactoe') return { board: Array(9).fill(null), currentPlayer: creatorId, playerX: creatorId, playerO: null, winner: null };
   if (type === 'rps') return { choices: {}, winner: null, round: 1 };
   if (type === 'number-guess') return { phase: 'choose', setterId: null, guesserId: null, secret: null, guesses: [], winner: null };
   if (type === 'hangman') return { phase: 'choose', setterId: null, guesserId: null, word: null, guessed: [], wrongGuesses: [], maxWrong: 6, winner: null };
+  if (type === 'draw-guess') return { phase: 'playing', round: 1, totalRounds: 4, drawerId: creatorId, words: shuffled(DRAW_WORDS).slice(0, 4), scores: {}, guesses: [], strokes: [], roundEndsAt: null, roundResult: null, winner: null };
+  if (type === 'trivia') return { phase: 'playing', qi: 0, questions: shuffled(TRIVIA_BANK).slice(0, 5), answers: {}, scores: {}, lastPoints: {}, questionEndsAt: null, winner: null };
   return {};
 }
 
@@ -1222,6 +1310,8 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
     'rps': { emoji:'✊', name:'Rock Paper Scissors', desc:'2 players' },
     'number-guess': { emoji:'🔢', name:'Number Guess', desc:'2 players' },
     'hangman': { emoji:'🔡', name:'Hangman', desc:'2 players' },
+    'draw-guess': { emoji:'🎨', name:'Draw & Guess', desc:'2 players' },
+    'trivia': { emoji:'🧠', name:'Trivia Duel', desc:'2 players' },
   };
 
   const bothIn = players.length >= 2;
@@ -1385,7 +1475,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         <button onClick={closeGame} className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
           <ArrowLeft size={16} style={{color:accentColor}}/>
         </button>
-        <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':'Hangman'}</span>
+        <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':gameType==='draw-guess'?'Draw & Guess':gameType==='trivia'?'Trivia Duel':'Hangman'}</span>
         <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{players.length} player{players.length===1?'':'s'} in</span>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
@@ -1403,6 +1493,8 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       {gameType==='rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='hangman' && game && <Hangman game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='draw-guess' && game && <DrawGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
     </div>
   );
 }
@@ -1770,6 +1862,446 @@ function Hangman({ game, state, profile, accentColor, canPlay, players, onUpdate
   );
 }
 
+
+// Draw & Guess — one player draws a secret word on a canvas, the other
+// guesses it before the 60s timer runs out. 4 rounds, roles swap every
+// round, each player draws twice. A correct guess scores +10 for the
+// guesser and +5 for the drawer; a timeout scores nothing. The word
+// lives in synced state but the UI hides it from the guesser (same
+// honesty note as Hangman). Strokes sync when the drawer finishes each
+// stroke (lifts the pen / mouse).
+const DRAW_COLORS = ['#2B2B2B', '#E63946', '#2563EB', '#2E9E5B', '#F4A259', '#8E44AD', '#FFFFFF'];
+const DRAW_SIZES = [3, 6, 10];
+
+function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+  const [guessInput, setGuessInput] = useState('');
+  const [savingGuess, setSavingGuess] = useState(false);
+  const [color, setColor] = useState('#2B2B2B');
+  const [brush, setBrush] = useState(6);
+  const [now, setNow] = useState(() => Date.now());
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawingRef = useRef(false);
+  const strokeRef = useRef<number[][]>([]);
+  const strokesRef = useRef<any[]>([]);
+  const armedRef = useRef(-1);
+  const timeoutRef = useRef(-1);
+  const advanceRef = useRef('');
+
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const iAmDrawer = state.drawerId === profile?.id;
+  const round = state.round || 1;
+  const totalRounds = state.totalRounds || 4;
+  const wordObj = (state.words || [])[round - 1] || { w: '', hint: '' };
+  const word: string = wordObj.w || '';
+  const strokes: any[] = state.strokes || [];
+  const guesses: any[] = state.guesses || [];
+  const scores: Record<string, number> = state.scores || {};
+  const myScore = scores[profile?.id] || 0;
+  const theirScore = otherId ? (scores[otherId] || 0) : 0;
+  const phase = state.phase || 'playing';
+  const finished = phase === 'finished';
+  const roundEndsAt: number | null = state.roundEndsAt || null;
+  const remaining = roundEndsAt ? Math.max(0, Math.ceil((roundEndsAt - now) / 1000)) : 60;
+
+  async function saveState(newState: any, done: boolean) {
+    const supabase = createClient();
+    await supabase.from('games').update({ state: newState, status: done ? 'finished' : 'active', winner_id: done && newState.winner && newState.winner !== 'draw' ? newState.winner : null }).eq('id', game.id);
+    onUpdate(newState);
+  }
+
+  // Local clock for the countdown.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, []);
+
+  // Arm the 60s round timer once both players are in (either client may
+  // arm it; the writes are identical, so a double-write is harmless).
+  useEffect(() => {
+    if (!canPlay || phase !== 'playing' || roundEndsAt || armedRef.current === round) return;
+    armedRef.current = round;
+    void saveState({ ...state, roundEndsAt: Date.now() + 60000 }, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPlay, phase, roundEndsAt, round]);
+
+  // End the round when the timer runs out (either client; same result).
+  useEffect(() => {
+    if (!canPlay || phase !== 'playing' || !roundEndsAt || now <= roundEndsAt || timeoutRef.current === round) return;
+    timeoutRef.current = round;
+    void saveState({ ...state, phase: 'roundEnd', roundEndsAt: null, roundResult: { outcome: 'timeout', word } }, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPlay, phase, roundEndsAt, now, round]);
+
+  // Redraw the canvas from synced strokes whenever they change.
+  useEffect(() => {
+    strokesRef.current = strokes;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (const s of strokes) drawStrokeOn(ctx, s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strokes, phase, round]);
+
+  function canvasPoint(e: RPointerEvent<HTMLCanvasElement>): number[] {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return [Math.round((e.clientX - rect.left) * (canvas.width / rect.width)), Math.round((e.clientY - rect.top) * (canvas.height / rect.height))];
+  }
+
+  function onPointerDown(e: RPointerEvent<HTMLCanvasElement>) {
+    if (!iAmDrawer || phase !== 'playing') return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    drawingRef.current = true;
+    strokeRef.current = [canvasPoint(e)];
+    const ctx = canvasRef.current?.getContext('2d');
+    const p0 = strokeRef.current[0];
+    if (ctx) { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p0[0], p0[1], brush / 2, 0, Math.PI * 2); ctx.fill(); }
+  }
+
+  function onPointerMove(e: RPointerEvent<HTMLCanvasElement>) {
+    if (!drawingRef.current || !iAmDrawer) return;
+    e.preventDefault();
+    const pts = strokeRef.current;
+    const p = canvasPoint(e);
+    const prev = pts[pts.length - 1];
+    pts.push(p);
+    const ctx = canvasRef.current?.getContext('2d');
+    if (ctx && prev) {
+      ctx.strokeStyle = color; ctx.lineWidth = brush; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(p[0], p[1]); ctx.stroke();
+    }
+  }
+
+  async function onPointerUp() {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    const pts = strokeRef.current;
+    strokeRef.current = [];
+    if (pts.length === 0) return;
+    await saveState({ ...state, strokes: [...strokesRef.current, { color, size: brush, points: pts }] }, false);
+  }
+
+  async function clearCanvas() {
+    if (!iAmDrawer) return;
+    await saveState({ ...state, strokes: [] }, false);
+  }
+
+  async function submitGuess() {
+    const g = guessInput.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!g || iAmDrawer || phase !== 'playing' || savingGuess || !word) return;
+    setSavingGuess(true);
+    try {
+      const correct = g === word.toLowerCase();
+      const newGuesses = [...guesses, { player: profile?.id, text: guessInput.trim(), correct }];
+      if (correct) {
+        const newScores = { ...scores, [profile.id]: myScore + 10, [state.drawerId]: (scores[state.drawerId] || 0) + 5 };
+        await saveState({ ...state, guesses: newGuesses, scores: newScores, phase: 'roundEnd', roundEndsAt: null, roundResult: { outcome: 'guessed', word, by: profile?.id } }, false);
+      } else {
+        await saveState({ ...state, guesses: newGuesses }, false);
+      }
+      setGuessInput('');
+    } finally {
+      setSavingGuess(false);
+    }
+  }
+
+  async function advance() {
+    const key = `${round}-roundEnd`;
+    if (advanceRef.current === key) return;
+    advanceRef.current = key;
+    if (round >= totalRounds) {
+      const ids = [game.created_by, otherId].filter(Boolean);
+      const s0 = scores[ids[0]] || 0;
+      const s1 = scores[ids[1]] || 0;
+      const winner = s0 === s1 ? 'draw' : (s0 > s1 ? ids[0] : ids[1]);
+      await saveState({ ...state, phase: 'finished', winner }, true);
+    } else {
+      await saveState({ ...state, phase: 'playing', round: round + 1, drawerId: otherId || state.drawerId, strokes: [], guesses: [], roundResult: null, roundEndsAt: null }, false);
+    }
+  }
+
+  if (!canPlay) {
+    return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Waiting for the second player…</p></div>;
+  }
+
+  const blanks = word ? word.split('').map(() => '_').join(' ') : '';
+
+  if (finished) {
+    const winnerText = state.winner === 'draw' ? "It's a tie! 🤝" : state.winner === profile?.id ? '🏆 You win!' : '🏆 Your friend wins!';
+    return (
+      <div className="space-y-4 text-center">
+        <div className="p-4 rounded-2xl" style={{background:`${accentColor}22`}}>
+          <p className="font-black text-lg theme-text">{winnerText}</p>
+          <p className="text-sm mt-1 font-bold theme-text">Final score — You: {myScore} · Them: {theirScore}</p>
+          <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>Tap Restart above to play again with new words.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'roundEnd' && state.roundResult) {
+    const r = state.roundResult;
+    const lastRound = round >= totalRounds;
+    return (
+      <div className="space-y-4 text-center">
+        <div className="p-4 rounded-2xl" style={{background:`${accentColor}22`}}>
+          <p className="font-black text-lg theme-text">
+            {r.outcome === 'guessed'
+              ? `🎉 ${r.by === profile?.id ? 'You guessed it!' : 'Your friend guessed it!'} The word was "${r.word}"`
+              : `⏰ Time's up! The word was "${r.word}"`}
+          </p>
+          <p className="text-sm mt-1 font-bold theme-text">Score — You: {myScore} · Them: {theirScore}</p>
+          <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>{r.outcome === 'guessed' ? 'Guesser +10, drawer +5.' : 'No points this round.'}</p>
+        </div>
+        <button onClick={advance} className="theme-btn px-6 py-3 text-sm" style={{background:accentColor}}>
+          {lastRound ? 'See results 🏆' : 'Next round →'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between text-sm font-bold theme-text">
+        <span>Round {round} of {totalRounds} 🎨</span>
+        <span style={{color: remaining <= 10 ? '#FF6B6B' : 'var(--color-text)'}}>⏱ {remaining}s</span>
+        <span>You: {myScore} · Them: {theirScore}</span>
+      </div>
+      {iAmDrawer ? (
+        <p className="text-center font-bold theme-text">Your word: <span style={{color:accentColor}}>{word}</span> <span className="text-xs font-semibold" style={{color:'var(--color-text-muted)'}}>({wordObj.hint}) — draw it, don&apos;t write it!</span></p>
+      ) : (
+        <div className="text-center">
+          <p className="text-xl font-black tracking-widest theme-text">{blanks}</p>
+          <p className="text-xs font-semibold" style={{color:'var(--color-text-muted)'}}>Hint: {wordObj.hint} · {word.length} letters · Your friend is drawing… 👀</p>
+        </div>
+      )}
+      <canvas ref={canvasRef} width={600} height={400} className="w-full rounded-2xl"
+        style={{ background: '#FFFFFF', border: `2px solid ${accentColor}33`, touchAction: 'none', cursor: iAmDrawer ? 'crosshair' : 'default' }}
+        onPointerDown={iAmDrawer ? onPointerDown : undefined}
+        onPointerMove={iAmDrawer ? onPointerMove : undefined}
+        onPointerUp={iAmDrawer ? onPointerUp : undefined}
+        onPointerLeave={iAmDrawer ? onPointerUp : undefined}
+      />
+      {iAmDrawer ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 justify-center flex-wrap">
+            {DRAW_COLORS.map(c => (
+              <button key={c} onClick={() => setColor(c)} title={c === '#FFFFFF' ? 'Eraser' : c}
+                className="rounded-full transition-all hover:scale-110"
+                style={{ width: 28, height: 28, background: c, border: color === c ? `3px solid ${accentColor}` : '2px solid rgba(0,0,0,0.15)' }} />
+            ))}
+          </div>
+          <div className="flex items-center gap-2 justify-center">
+            {DRAW_SIZES.map(s => (
+              <button key={s} onClick={() => setBrush(s)}
+                className="px-3 py-1.5 rounded-full text-xs font-bold transition-all"
+                style={{ background: brush === s ? accentColor : 'rgba(var(--color-overlay-rgb),0.8)', color: brush === s ? '#fff' : 'var(--color-text)' }}>
+                {s === 3 ? 'Thin' : s === 6 ? 'Medium' : 'Thick'}
+              </button>
+            ))}
+            <button onClick={clearCanvas} className="px-3 py-1.5 rounded-full text-xs font-bold"
+              style={{ background: 'rgba(var(--color-overlay-rgb),0.8)', color: 'var(--color-text)' }}>Clear 🧹</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input type="text" value={guessInput} onChange={e=>setGuessInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submitGuess()}
+            placeholder="What is it? Type your guess…" maxLength={30} className="theme-input flex-1 py-3 px-4 text-sm"/>
+          <button onClick={submitGuess} disabled={savingGuess} className="theme-btn px-5 py-3 text-sm" style={{background:accentColor}}>Guess!</button>
+        </div>
+      )}
+      {guesses.length > 0 && (
+        <div className="space-y-2 max-h-40 overflow-y-auto">
+          {[...guesses].reverse().map((g: any, i: number) => (
+            <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
+              <span className="font-bold text-sm theme-text">{g.text}</span>
+              <span className="text-sm" style={{color: g.correct ? '#4ADE80' : 'var(--color-text-muted)'}}>{g.correct ? '✅ Correct!' : '❌ Not it'}</span>
+              <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{g.player === profile?.id ? 'You' : 'Them'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Trivia Duel — the same 5 questions for both players, answered at the
+// same time, 15s per question. A correct answer scores 10 + the seconds
+// left on the clock (fast = more points); wrong or timeout scores 0.
+// After each question both players see the correct answer and the scores.
+function TriviaDuel({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+  const [now, setNow] = useState(() => Date.now());
+  const armedRef = useRef(-1);
+  const revealRef = useRef(-1);
+  const advanceRef = useRef('');
+
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const qi = state.qi || 0;
+  const questions: any[] = state.questions || [];
+  const q = questions[qi] || null;
+  const answers: Record<string, any> = state.answers || {};
+  const scores: Record<string, number> = state.scores || {};
+  const lastPoints: Record<string, number> = state.lastPoints || {};
+  const myScore = scores[profile?.id] || 0;
+  const theirScore = otherId ? (scores[otherId] || 0) : 0;
+  const phase = state.phase || 'playing';
+  const finished = phase === 'finished';
+  const questionEndsAt: number | null = state.questionEndsAt || null;
+  const remaining = questionEndsAt ? Math.max(0, Math.ceil((questionEndsAt - now) / 1000)) : 15;
+  const myAnswer = answers[profile?.id];
+  const theirAnswer = otherId ? answers[otherId] : null;
+  const playerIds = (players || []).map((p: any) => p.user_id);
+  const bothAnswered = playerIds.length >= 2 ? playerIds.every((id: string) => answers[id]) : Object.keys(answers).length >= 2;
+
+  async function saveState(newState: any, done: boolean) {
+    const supabase = createClient();
+    await supabase.from('games').update({ state: newState, status: done ? 'finished' : 'active', winner_id: done && newState.winner && newState.winner !== 'draw' ? newState.winner : null }).eq('id', game.id);
+    onUpdate(newState);
+  }
+
+  // Local clock for the countdown.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, []);
+
+  // Arm the 15s question timer once both players are in (either client
+  // may arm it; the writes are identical, so a double-write is harmless).
+  useEffect(() => {
+    if (!canPlay || phase !== 'playing' || questionEndsAt || armedRef.current === qi) return;
+    armedRef.current = qi;
+    void saveState({ ...state, questionEndsAt: Date.now() + 15000 }, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPlay, phase, questionEndsAt, qi]);
+
+  // Reveal when both players answered or time runs out (either client
+  // may compute it; both compute the same result from the same state).
+  useEffect(() => {
+    if (!canPlay || phase !== 'playing' || !questionEndsAt || !q || revealRef.current === qi) return;
+    const expired = now > questionEndsAt;
+    if (!bothAnswered && !expired) return;
+    revealRef.current = qi;
+    const newScores = { ...scores };
+    const pts: Record<string, number> = {};
+    for (const id of Object.keys(answers)) {
+      const a = answers[id];
+      if (a.option === q.answer) {
+        const bonus = Math.max(0, Math.floor((questionEndsAt - a.at) / 1000));
+        pts[id] = 10 + bonus;
+        newScores[id] = (newScores[id] || 0) + pts[id];
+      } else {
+        pts[id] = 0;
+      }
+    }
+    void saveState({ ...state, scores: newScores, lastPoints: pts, phase: 'reveal' }, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPlay, phase, questionEndsAt, now, qi, bothAnswered, q]);
+
+  async function answer(option: number) {
+    if (phase !== 'playing' || myAnswer || !questionEndsAt || now > questionEndsAt) return;
+    await saveState({ ...state, answers: { ...answers, [profile.id]: { option, at: Date.now() } } }, false);
+  }
+
+  async function advance() {
+    const key = `${qi}-reveal`;
+    if (advanceRef.current === key) return;
+    advanceRef.current = key;
+    if (qi >= questions.length - 1) {
+      const ids = [game.created_by, otherId].filter(Boolean);
+      const s0 = scores[ids[0]] || 0;
+      const s1 = scores[ids[1]] || 0;
+      const winner = s0 === s1 ? 'draw' : (s0 > s1 ? ids[0] : ids[1]);
+      await saveState({ ...state, phase: 'finished', winner }, true);
+    } else {
+      await saveState({ ...state, phase: 'playing', qi: qi + 1, answers: {}, lastPoints: {}, questionEndsAt: null }, false);
+    }
+  }
+
+  if (!canPlay) {
+    return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Waiting for the second player…</p></div>;
+  }
+
+  if (!q) {
+    return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Loading questions… 🧠</p></div>;
+  }
+
+  if (finished) {
+    const winnerText = state.winner === 'draw' ? "It's a tie! 🤝" : state.winner === profile?.id ? '🏆 You win!' : '🏆 Your friend wins!';
+    return (
+      <div className="space-y-4 text-center">
+        <div className="p-4 rounded-2xl" style={{background:`${accentColor}22`}}>
+          <p className="font-black text-lg theme-text">{winnerText}</p>
+          <p className="text-sm mt-1 font-bold theme-text">Final score — You: {myScore} · Them: {theirScore}</p>
+          <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>Tap Restart above for a fresh duel with new questions.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const myPoints = lastPoints[profile?.id];
+  const theirPoints = otherId ? lastPoints[otherId] : undefined;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between text-sm font-bold theme-text">
+        <span>Question {qi + 1} of {questions.length} 🧠</span>
+        <span className="px-2 py-0.5 rounded-full text-xs" style={{background:`${accentColor}22`, color:accentColor}}>{q.cat}</span>
+        <span style={{color: remaining <= 5 && phase === 'playing' ? '#FF6B6B' : 'var(--color-text)'}}>⏱ {phase === 'playing' ? `${remaining}s` : 'Done!'}</span>
+        <span>You: {myScore} · Them: {theirScore}</span>
+      </div>
+      <p className="font-black text-base theme-text text-center">{q.q}</p>
+      <div className="space-y-2">
+        {q.options.map((opt: string, i: number) => {
+          const isCorrect = i === q.answer;
+          const iPicked = myAnswer?.option === i;
+          const theyPicked = theirAnswer?.option === i;
+          let bg = 'rgba(var(--color-overlay-rgb),0.8)';
+          let border = `${accentColor}33`;
+          if (phase === 'reveal') {
+            if (isCorrect) { bg = 'rgba(74,222,128,0.18)'; border = '#4ADE80'; }
+            else if (iPicked || theyPicked) { bg = 'rgba(255,107,107,0.12)'; border = '#FF6B6B'; }
+          } else if (iPicked) {
+            bg = `${accentColor}22`; border = accentColor;
+          }
+          return (
+            <button key={i} onClick={() => answer(i)} disabled={phase !== 'playing' || !!myAnswer}
+              className="w-full text-left p-3 rounded-2xl text-sm font-bold transition-all hover:scale-[1.01]"
+              style={{ background: bg, border: `2px solid ${border}`, color: 'var(--color-text)', opacity: phase === 'playing' && myAnswer && !iPicked ? 0.6 : 1 }}>
+              <span className="flex items-center gap-2">
+                <span>{opt}</span>
+                {phase === 'reveal' && isCorrect && <span className="ml-auto">✅ Correct</span>}
+                {phase === 'reveal' && iPicked && !isCorrect && <span className="ml-auto text-xs">You picked this</span>}
+                {phase === 'reveal' && theyPicked && !isCorrect && <span className="ml-auto text-xs">They picked this</span>}
+                {phase === 'playing' && iPicked && <span className="ml-auto text-xs">Your pick ✓</span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {phase === 'playing' && (
+        <p className="text-xs text-center font-semibold" style={{color:'var(--color-text-muted)'}}>
+          {myAnswer
+            ? (bothAnswered ? 'Both answered — revealing…' : 'Locked in! Waiting for your friend…')
+            : 'Faster correct answers score more: 10 points + 1 per second left. Wrong or timeout = 0.'}
+        </p>
+      )}
+      {phase === 'reveal' && (
+        <div className="space-y-3 text-center">
+          <p className="text-sm font-bold theme-text">
+            {myPoints !== undefined ? `You earned +${myPoints}` : 'You didn\u2019t answer'} · {theirPoints !== undefined ? `They earned +${theirPoints}` : 'They didn\u2019t answer'}
+          </p>
+          <button onClick={advance} className="theme-btn px-6 py-3 text-sm" style={{background:accentColor}}>
+            {qi >= questions.length - 1 ? 'See results 🏆' : 'Next question →'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Loading() {
   return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0,1,2].map(i=><div key={i} style={{width:10,height:10,borderRadius:'50%',background:'var(--color-accent)',animation:'float 1s ease-in-out infinite',animationDelay:`${i*0.2}s`}}/>)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
