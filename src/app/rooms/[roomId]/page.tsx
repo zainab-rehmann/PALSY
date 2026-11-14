@@ -3,10 +3,10 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useRef, useCallback, Fragment, type PointerEvent as RPointerEvent } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import type { Profile, Room, RoomMember, Message, Game } from '@/types';
+import type { Profile, Room, RoomMember, Message, MessageReceipt, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
 import {
-  ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, Hash, Lock, LockOpen,
+  ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, CheckCheck, Hash, Lock, LockOpen,
   Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star
 } from 'lucide-react';
 import Link from 'next/link';
@@ -32,6 +32,25 @@ const PRESETS: Record<string,{bg:string;accent:string;emoji:string}> = {
 };
 
 type Tab = 'chat' | 'members' | 'games' | 'settings';
+
+// Room ticks (migration 015): stamp my delivery/read receipts for the
+// given messages. Delivered = my open room view received the message;
+// read = I had the chat tab in view. Idempotent upserts: the delivered
+// stamp never touches read_at, so a later read stamp is what flips ticks.
+async function stampReceipts(
+  supabase: ReturnType<typeof createClient>,
+  roomId: string,
+  userId: string,
+  ids: string[],
+  read: boolean,
+) {
+  if (!ids.length) return;
+  const now = new Date().toISOString();
+  const rows = ids.map((id) => read
+    ? { message_id: id, user_id: userId, room_id: roomId, delivered_at: now, read_at: now }
+    : { message_id: id, user_id: userId, room_id: roomId, delivered_at: now });
+  await supabase.from('message_receipts').upsert(rows, { onConflict: 'message_id,user_id' });
+}
 
 export default function RoomPage() {
   const router = useRouter();
@@ -82,6 +101,11 @@ export default function RoomPage() {
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [showStarred, setShowStarred] = useState(false);
   const [starredMessages, setStarredMessages] = useState<Message[]>([]);
+  // Room ticks: per-message receipt rows, keyed by message id. A message
+  // counts as delivered/seen only when EVERY other current member has a
+  // row (members who join later have none until they open the room).
+  const [receipts, setReceipts] = useState<Record<string, MessageReceipt[]>>({});
+  const tabRef = useRef<Tab>('chat');
   const [highlightId, setHighlightId] = useState<string|null>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [jumpNote, setJumpNote] = useState('');
@@ -194,11 +218,35 @@ export default function RoomPage() {
     setHasMore((msgs||[]).length === CHAT_PAGE_SIZE);
     setLoading(false);
 
+    // Room ticks: load existing receipts, then stamp my own delivery
+    // (and read, when the chat is in view) for others' messages.
+    const { data: rcpts } = await supabase.from('message_receipts').select('*').eq('room_id', roomId);
+    if (rcpts) {
+      const map: Record<string, MessageReceipt[]> = {};
+      (rcpts as MessageReceipt[]).forEach(r => { (map[r.message_id] ||= []).push(r); });
+      setReceipts(map);
+    }
+    const othersIds = ordered.filter(m => m.sender_id !== user.id).map(m => m.id);
+    await stampReceipts(supabase, roomId, user.id, othersIds, false);
+    if (document.visibilityState === 'visible') {
+      await stampReceipts(supabase, roomId, user.id, othersIds, true);
+    }
+
     // Realtime
     const channel = supabase.channel(`room-${roomId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, async (payload) => {
         const { data: full } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').eq('id', payload.new.id).single();
-        if (full) setMessages(m=> m.some(x=>x.id===full.id) ? m : [...m, full]);
+        if (full) {
+          setMessages(m=> m.some(x=>x.id===full.id) ? m : [...m, full]);
+          // Room ticks: a message arriving while the room is open counts
+          // as delivered; read too when the chat tab is in view.
+          if (full.sender_id !== user.id) {
+            await stampReceipts(supabase, roomId, user.id, [full.id], false);
+            if (document.visibilityState === 'visible' && tabRef.current === 'chat') {
+              await stampReceipts(supabase, roomId, user.id, [full.id], true);
+            }
+          }
+        }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
         const upd = payload.new as Message;
@@ -212,11 +260,63 @@ export default function RoomPage() {
         const old = payload.old as Message;
         if (old?.id) setMessages(m=>m.filter(x=>x.id!==old.id));
       })
+      // Room ticks: receipt rows arrive live so the sender's ticks flip
+      // without a reload when members open the room.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_receipts', filter: `room_id=eq.${roomId}` }, (payload) => {
+        const row = payload.new as MessageReceipt;
+        setReceipts(prev => {
+          const list = prev[row.message_id] || [];
+          if (list.some(r => r.user_id === row.user_id)) return prev;
+          return { ...prev, [row.message_id]: [...list, row] };
+        });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'message_receipts', filter: `room_id=eq.${roomId}` }, (payload) => {
+        const row = payload.new as MessageReceipt;
+        setReceipts(prev => {
+          const list = prev[row.message_id] || [];
+          return { ...prev, [row.message_id]: list.some(r => r.user_id === row.user_id) ? list.map(r => r.user_id === row.user_id ? row : r) : [...list, row] };
+        });
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'message_receipts', filter: `room_id=eq.${roomId}` }, (payload) => {
+        const old = payload.old as MessageReceipt;
+        if (!old?.message_id) return;
+        setReceipts(prev => {
+          const list = (prev[old.message_id] || []).filter(r => r.user_id !== old.user_id);
+          return { ...prev, [old.message_id]: list };
+        });
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [router, roomId, gateTick]);
 
+  // Room ticks: 'seen' only when every other current member has read the
+  // message; 'delivered' when every other member's open room view got it.
+  function tickState(msg: Message): 'seen' | 'delivered' | 'sent' {
+    const others = members.filter(m => m.user_id !== msg.sender_id).map(m => m.user_id);
+    if (!others.length) return 'sent';
+    const rows = receipts[msg.id] || [];
+    const has = (id: string, read: boolean) => rows.some(r => r.user_id === id && (!read || !!r.read_at));
+    if (others.every(id => has(id, true))) return 'seen';
+    if (others.every(id => has(id, false))) return 'delivered';
+    return 'sent';
+  }
+
   useEffect(() => { load(); }, [load]);
+  // Room ticks: keep tabRef current, and stamp "read" whenever the chat
+  // tab is in view (covers switching back to chat and refocusing the tab).
+  useEffect(() => { tabRef.current = tab; }, [tab]);
+  useEffect(() => {
+    if (tab !== 'chat' || !profile) return;
+    const supabase = createClient();
+    const stampVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const ids = messages.filter(m => m.sender_id !== profile.id && !m.id.startsWith('temp-')).map(m => m.id);
+      stampReceipts(supabase, roomId, profile.id, ids, true);
+    };
+    stampVisible();
+    document.addEventListener('visibilitychange', stampVisible);
+    return () => document.removeEventListener('visibilitychange', stampVisible);
+  }, [tab, profile, messages, roomId]);
   // Scroll to bottom only when the newest message changes — never when
   // older history is prepended.
   useEffect(() => {
@@ -362,6 +462,16 @@ export default function RoomPage() {
     const prevHeight = el ? el.scrollHeight : 0;
     const older = await fetchOlderPage(messages[0].created_at);
     setMessages(m=>[...older, ...m]);
+    // Room ticks: older history just received counts as delivered (and
+    // read when the chat is in view), same as the first page.
+    if (profile) {
+      const supabase = createClient();
+      const ids = older.filter(m => m.sender_id !== profile.id).map(m => m.id);
+      await stampReceipts(supabase, roomId, profile.id, ids, false);
+      if (document.visibilityState === 'visible' && tabRef.current === 'chat') {
+        await stampReceipts(supabase, roomId, profile.id, ids, true);
+      }
+    }
     setHasMore(older.length === CHAT_PAGE_SIZE);
     setLoadingOlder(false);
     requestAnimationFrame(() => {
@@ -849,6 +959,7 @@ export default function RoomPage() {
               )}
               {messages.map((msg, i)=>{
                 const mine = msg.sender_id===profile?.id;
+                const ticks = mine && !msg.failed ? tickState(msg) : null;
                 const sender = msg.sender as Profile;
                 // WhatsApp-style day divider: Today / Yesterday / full date.
                 const prev = messages[i-1];
@@ -937,7 +1048,7 @@ export default function RoomPage() {
                           </>
                         )}
                       </div>
-                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:accentColor}}/>}{starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}</span>
+                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:accentColor}}/>}{starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{ticks === 'seen' ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-accent)'}}><CheckCheck size={15}/> Seen</span> : ticks === 'delivered' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span> : ticks === 'sent' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span> : null}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}</span>
                     </div>
                   </div>
                   </Fragment>
@@ -1886,6 +1997,11 @@ function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpda
   const armedRef = useRef(-1);
   const timeoutRef = useRef(-1);
   const advanceRef = useRef('');
+  // Latest synced state, for writes. Every save must spread THIS, not the
+  // render closure's `state`: the other player's writes (guesses, strokes)
+  // land between renders, and spreading a stale snapshot wipes them.
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
   const iAmDrawer = state.drawerId === profile?.id;
@@ -1920,7 +2036,7 @@ function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpda
   useEffect(() => {
     if (!canPlay || phase !== 'playing' || roundEndsAt || armedRef.current === round) return;
     armedRef.current = round;
-    void saveState({ ...state, roundEndsAt: Date.now() + 60000 }, false);
+    void saveState({ ...stateRef.current, roundEndsAt: Date.now() + 60000 }, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canPlay, phase, roundEndsAt, round]);
 
@@ -1928,7 +2044,9 @@ function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpda
   useEffect(() => {
     if (!canPlay || phase !== 'playing' || !roundEndsAt || now <= roundEndsAt || timeoutRef.current === round) return;
     timeoutRef.current = round;
-    void saveState({ ...state, phase: 'roundEnd', roundEndsAt: null, roundResult: { outcome: 'timeout', word } }, false);
+    const cur = stateRef.current;
+    const curWord = ((cur.words || [])[(cur.round || 1) - 1] || {}).w || word;
+    void saveState({ ...cur, phase: 'roundEnd', roundEndsAt: null, roundResult: { outcome: 'timeout', word: curWord } }, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canPlay, phase, roundEndsAt, now, round]);
 
@@ -1982,12 +2100,17 @@ function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpda
     const pts = strokeRef.current;
     strokeRef.current = [];
     if (pts.length === 0) return;
-    await saveState({ ...state, strokes: [...strokesRef.current, { color, size: brush, points: pts }] }, false);
+    // Update the mirror immediately so a fast next stroke never loses
+    // this one, and spread the freshest state so guesses never get wiped.
+    const next = [...strokesRef.current, { color, size: brush, points: pts }];
+    strokesRef.current = next;
+    await saveState({ ...stateRef.current, strokes: next }, false);
   }
 
   async function clearCanvas() {
     if (!iAmDrawer) return;
-    await saveState({ ...state, strokes: [] }, false);
+    strokesRef.current = [];
+    await saveState({ ...stateRef.current, strokes: [] }, false);
   }
 
   async function submitGuess() {
@@ -1995,13 +2118,18 @@ function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpda
     if (!g || iAmDrawer || phase !== 'playing' || savingGuess || !word) return;
     setSavingGuess(true);
     try {
-      const correct = g === word.toLowerCase();
-      const newGuesses = [...guesses, { player: profile?.id, text: guessInput.trim(), correct }];
+      // Build the write from the freshest state: spreading the render
+      // snapshot here used to wipe the drawer's strokes.
+      const cur = stateRef.current;
+      const curWord = ((cur.words || [])[(cur.round || 1) - 1] || {}).w || word;
+      const correct = g === curWord.toLowerCase();
+      const newGuesses = [...(cur.guesses || []), { player: profile?.id, text: guessInput.trim(), correct }];
       if (correct) {
-        const newScores = { ...scores, [profile.id]: myScore + 10, [state.drawerId]: (scores[state.drawerId] || 0) + 5 };
-        await saveState({ ...state, guesses: newGuesses, scores: newScores, phase: 'roundEnd', roundEndsAt: null, roundResult: { outcome: 'guessed', word, by: profile?.id } }, false);
+        const curScores = cur.scores || {};
+        const newScores = { ...curScores, [profile.id]: (curScores[profile.id] || 0) + 10, [cur.drawerId]: (curScores[cur.drawerId] || 0) + 5 };
+        await saveState({ ...cur, guesses: newGuesses, scores: newScores, phase: 'roundEnd', roundEndsAt: null, roundResult: { outcome: 'guessed', word: curWord, by: profile?.id } }, false);
       } else {
-        await saveState({ ...state, guesses: newGuesses }, false);
+        await saveState({ ...cur, guesses: newGuesses }, false);
       }
       setGuessInput('');
     } finally {
@@ -2013,18 +2141,21 @@ function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpda
     const key = `${round}-roundEnd`;
     if (advanceRef.current === key) return;
     advanceRef.current = key;
-    if (round >= totalRounds) {
+    const cur = stateRef.current;
+    const curRound = cur.round || round;
+    const curScores = cur.scores || {};
+    if (curRound >= totalRounds) {
       const ids = [game.created_by, otherId].filter(Boolean);
-      const s0 = scores[ids[0]] || 0;
-      const s1 = scores[ids[1]] || 0;
+      const s0 = curScores[ids[0]] || 0;
+      const s1 = curScores[ids[1]] || 0;
       const winner = s0 === s1 ? 'draw' : (s0 > s1 ? ids[0] : ids[1]);
-      await saveState({ ...state, phase: 'finished', winner }, true);
+      await saveState({ ...cur, phase: 'finished', winner }, true);
     } else {
       // Swap the drawer: the next drawer is whoever is NOT the current
       // drawer. (Must be computed from the current drawer, not from the
       // tapping player — either player may tap Next round.)
-      const nextDrawer = (players || []).find((p: any) => p.user_id !== state.drawerId)?.user_id || otherId || state.drawerId;
-      await saveState({ ...state, phase: 'playing', round: round + 1, drawerId: nextDrawer, strokes: [], guesses: [], roundResult: null, roundEndsAt: null }, false);
+      const nextDrawer = (players || []).find((p: any) => p.user_id !== cur.drawerId)?.user_id || otherId || cur.drawerId;
+      await saveState({ ...cur, phase: 'playing', round: curRound + 1, drawerId: nextDrawer, strokes: [], guesses: [], roundResult: null, roundEndsAt: null }, false);
     }
   }
 
@@ -2142,6 +2273,12 @@ function TriviaDuel({ game, state, profile, accentColor, canPlay, players, onUpd
   const armedRef = useRef(-1);
   const revealRef = useRef(-1);
   const advanceRef = useRef('');
+  // Latest synced state, for writes. Every save must spread THIS, not the
+  // render closure's `state`: the other player's answer lands between
+  // renders, and spreading a stale snapshot wipes it (same race as the
+  // Draw & Guess stroke wipe).
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
   const qi = state.qi || 0;
@@ -2178,7 +2315,7 @@ function TriviaDuel({ game, state, profile, accentColor, canPlay, players, onUpd
   useEffect(() => {
     if (!canPlay || phase !== 'playing' || questionEndsAt || armedRef.current === qi) return;
     armedRef.current = qi;
-    void saveState({ ...state, questionEndsAt: Date.now() + 15000 }, false);
+    void saveState({ ...stateRef.current, questionEndsAt: Date.now() + 15000 }, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canPlay, phase, questionEndsAt, qi]);
 
@@ -2189,39 +2326,50 @@ function TriviaDuel({ game, state, profile, accentColor, canPlay, players, onUpd
     const expired = now > questionEndsAt;
     if (!bothAnswered && !expired) return;
     revealRef.current = qi;
-    const newScores = { ...scores };
+    // Score from the freshest state so a just-arrived answer is counted.
+    const cur = stateRef.current;
+    const curAnswers: Record<string, any> = cur.answers || {};
+    const curQ = (cur.questions || [])[cur.qi || 0] || q;
+    const curEndsAt: number = cur.questionEndsAt || questionEndsAt || Date.now();
+    const newScores = { ...(cur.scores || {}) };
     const pts: Record<string, number> = {};
-    for (const id of Object.keys(answers)) {
-      const a = answers[id];
-      if (a.option === q.answer) {
-        const bonus = Math.max(0, Math.floor((questionEndsAt - a.at) / 1000));
+    for (const id of Object.keys(curAnswers)) {
+      const a = curAnswers[id];
+      if (a.option === curQ.answer) {
+        const bonus = Math.max(0, Math.floor((curEndsAt - a.at) / 1000));
         pts[id] = 10 + bonus;
         newScores[id] = (newScores[id] || 0) + pts[id];
       } else {
         pts[id] = 0;
       }
     }
-    void saveState({ ...state, scores: newScores, lastPoints: pts, phase: 'reveal' }, false);
+    void saveState({ ...cur, scores: newScores, lastPoints: pts, phase: 'reveal' }, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canPlay, phase, questionEndsAt, now, qi, bothAnswered, q]);
 
   async function answer(option: number) {
     if (phase !== 'playing' || myAnswer || !questionEndsAt || now > questionEndsAt) return;
-    await saveState({ ...state, answers: { ...answers, [profile.id]: { option, at: Date.now() } } }, false);
+    const cur = stateRef.current;
+    if ((cur.answers || {})[profile.id]) return;
+    await saveState({ ...cur, answers: { ...(cur.answers || {}), [profile.id]: { option, at: Date.now() } } }, false);
   }
 
   async function advance() {
     const key = `${qi}-reveal`;
     if (advanceRef.current === key) return;
     advanceRef.current = key;
-    if (qi >= questions.length - 1) {
+    const cur = stateRef.current;
+    const curQi = cur.qi ?? qi;
+    const curQuestions: any[] = cur.questions || questions;
+    const curScores: Record<string, number> = cur.scores || {};
+    if (curQi >= curQuestions.length - 1) {
       const ids = [game.created_by, otherId].filter(Boolean);
-      const s0 = scores[ids[0]] || 0;
-      const s1 = scores[ids[1]] || 0;
+      const s0 = curScores[ids[0]] || 0;
+      const s1 = curScores[ids[1]] || 0;
       const winner = s0 === s1 ? 'draw' : (s0 > s1 ? ids[0] : ids[1]);
-      await saveState({ ...state, phase: 'finished', winner }, true);
+      await saveState({ ...cur, phase: 'finished', winner }, true);
     } else {
-      await saveState({ ...state, phase: 'playing', qi: qi + 1, answers: {}, lastPoints: {}, questionEndsAt: null }, false);
+      await saveState({ ...cur, phase: 'playing', qi: curQi + 1, answers: {}, lastPoints: {}, questionEndsAt: null }, false);
     }
   }
 
