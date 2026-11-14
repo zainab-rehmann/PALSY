@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { notificationHref } from '@/lib/notify';
+import { getLockedChats } from '@/lib/locker';
 
 // Global new-message notifier (mounted once in the root layout).
 // - Stamps delivered_at when a DM reaches this device (WhatsApp's ✓✓)
@@ -23,6 +24,7 @@ export default function MessageNotifier() {
     // pop-ups off takes effect without a reload.
     let enabled = true;
     let roomMap = new Map<string, { muted: boolean; name: string }>();
+    let lockedSet = new Set<string>();
     const nameCache = new Map<string, string>();
     const seenNotifIds = new Set<string>();
 
@@ -63,6 +65,9 @@ export default function MessageNotifier() {
         roomMap = new Map<string, { muted: boolean; name: string }>(
           (myRooms || []).map((r: any) => [r.room_id, { muted: !!r.muted, name: r.room?.name || 'Room' }]),
         );
+        // Locked chats never show previews in pop-ups — generic only.
+        const locked = await getLockedChats(supabase);
+        lockedSet = new Set(locked.map((l) => `${l.chat_type}:${l.target_id}`));
       }
       await refreshSettings();
       refreshTimer = setInterval(refreshSettings, 30000);
@@ -80,6 +85,10 @@ export default function MessageNotifier() {
             const msg = payload.new as { id: string; sender_id: string; content: string | null; type: string };
             await supabase.from('messages').update({ delivered_at: new Date().toISOString() }).eq('id', msg.id).is('delivered_at', null);
             if (window.location.pathname === `/messages/${msg.sender_id}`) return;
+            if (lockedSet.has(`dm:${msg.sender_id}`)) {
+              pop('PALSY ♡ — 🔒 New message', 'You have a new message — unlock your locker to read it ♡', `dm-${msg.sender_id}`, `/messages/${msg.sender_id}`);
+              return;
+            }
             const name = await senderName(msg.sender_id);
             const body = msg.type === 'text' ? (msg.content || '').slice(0, 90)
               : msg.type === 'image' ? '📷 sent you a photo'
@@ -100,6 +109,10 @@ export default function MessageNotifier() {
             const info = roomMap.get(m.room_id);
             if (!info || info.muted) return;
             if (window.location.pathname === `/rooms/${m.room_id}`) return;
+            if (lockedSet.has(`room:${m.room_id}`)) {
+              pop('PALSY ♡ — 🔒 New message', 'You have a new message — unlock your locker to read it ♡', `room-${m.room_id}`, `/rooms/${m.room_id}`);
+              return;
+            }
             const name = await senderName(m.sender_id);
             const preview = m.type === 'text' ? (m.content || '').slice(0, 80) : 'sent a message ♡';
             pop(`PALSY ♡ — ${info.name}`, `${name}: ${preview}`, `room-${m.room_id}`, `/rooms/${m.room_id}`);
