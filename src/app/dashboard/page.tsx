@@ -152,7 +152,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {rooms.map(room=><RoomCard key={room.id} room={room}/>)}
+                {rooms.map(room=><RoomCard key={room.id} room={room} dark={profile?.theme==='autumn'}/>)}
               </div>
             )}
           </div>
@@ -213,19 +213,24 @@ function FriendRequestCard({ request, onAction }: { request: FriendRequest; onAc
   );
 }
 
-function RoomCard({ room }: { room: Room }) {
+function RoomCard({ room, dark }: { room: Room; dark?: boolean }) {
   const presetColors: Record<string,string> = {
     'cloudy-blue':'#DCEBFF','strawberry-milk':'#FCE3EE','lavender-dreams':'#EDE7F6',
     'peachy':'#FFF3E0','minty-fresh':'#E8F5E9','cotton-candy':'#FCE4EC',
   };
+  const presetAccents: Record<string,string> = {
+    'cloudy-blue':'#7CA8E8','strawberry-milk':'#E99ABD','lavender-dreams':'#9575CD',
+    'peachy':'#FF8A65','minty-fresh':'#66BB6A','cotton-candy':'#F48FB1',
+  };
   const bg = room.preset ? presetColors[room.preset] : (room.accent_color ? `${room.accent_color}22` : 'var(--color-secondary)');
+  const accent = room.preset ? presetAccents[room.preset] : (room.accent_color || 'var(--color-accent)');
   return (
     <Link href={`/rooms/${room.id}`}
       className="theme-card overflow-hidden hover:scale-[1.02] transition-all block"
-      style={{background:bg}}>
+      style={dark ? { background: 'var(--color-surface)', borderTop: `4px solid ${accent}` } : { background: bg }}>
       <div className="p-4">
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg" style={{background:'rgba(255,255,255,0.6)'}}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg" style={{background:'rgba(var(--color-overlay-rgb),0.6)'}}>
             {room.avatar_url ? <img src={room.avatar_url} alt={room.name} className="w-10 h-10 rounded-xl object-cover"/> : room.name[0].toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
