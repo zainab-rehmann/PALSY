@@ -6,7 +6,9 @@ import type { Profile, Room } from '@/types';
 import { DesktopNav, MobileNav } from '@/components/layout/AppLayout';
 import { Hash, Plus, Search, Lock, Globe, X, ArrowRight, KeyRound, Dices } from 'lucide-react';
 import EntryCodePrompt from '@/components/EntryCodePrompt';
+import LockerPrompt from '@/components/LockerPrompt';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
+import { getLockedChats, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 import Link from 'next/link';
 
 const PRESETS = [
@@ -42,6 +44,21 @@ function RoomsContent() {
   const [pendingRoom, setPendingRoom] = useState<Room | null>(null);
   const [entryError, setEntryError] = useState('');
   const [verifying, setVerifying] = useState(false);
+  // Chat locker (optional, personal)
+  const [lockedIds, setLockedIds] = useState<Set<string>>(new Set());
+  const [lockedOpen, setLockedOpen] = useState(false);
+  const [unlocked, setUnlocked] = useState(isLockerUnlocked());
+  const [lockerError, setLockerError] = useState('');
+  const [lockerBusy, setLockerBusy] = useState(false);
+
+  async function submitLockerCode(code: string) {
+    setLockerBusy(true); setLockerError('');
+    const supabase = createClient();
+    const ok = await verifyLockerCode(supabase, code);
+    setLockerBusy(false);
+    if (ok) { setLockerUnlocked(true); setUnlocked(true); }
+    else setLockerError("That code doesn't match — try again.");
+  }
 
   function closeModal() {
     setModal(null);
@@ -67,6 +84,8 @@ function RoomsContent() {
       const { data: roomData } = await supabase.from('rooms').select('*').in('id', memberOf.map(m=>m.room_id)).order('updated_at', {ascending:false});
       setRooms(roomData||[]);
     }
+    const locked = await getLockedChats(supabase);
+    setLockedIds(new Set(locked.filter(l=>l.chat_type==='room').map(l=>l.target_id)));
     setLoading(false);
   }, [router]);
 
@@ -154,7 +173,40 @@ function RoomsContent() {
           </div>
         </header>
 
-        <div className="p-4 md:p-8 max-w-4xl mx-auto">
+        <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-4">
+          {rooms.filter(r=>lockedIds.has(r.id)).length > 0 && (
+            <div className="space-y-2">
+              <button onClick={()=>setLockedOpen(v=>!v)} className="theme-card w-full p-4 flex items-center gap-3 hover:scale-[1.01] transition-all text-left">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-accent)'}}><Lock size={20}/></div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-sm theme-text">Locked rooms</p>
+                  <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{rooms.filter(r=>lockedIds.has(r.id)).length} hidden room{rooms.filter(r=>lockedIds.has(r.id)).length===1?'':'s'} · needs your locker code</p>
+                </div>
+                <ArrowRight size={16} style={{color:'var(--color-text-muted)', transform: lockedOpen ? 'rotate(90deg)' : undefined, transition: 'transform 0.2s'}}/>
+              </button>
+              {lockedOpen && !unlocked && (
+                <LockerPrompt error={lockerError} busy={lockerBusy} onSubmit={submitLockerCode} onCancel={()=>setLockedOpen(false)} />
+              )}
+              {lockedOpen && unlocked && (
+                <div className="space-y-2">
+                  {rooms.filter(r=>lockedIds.has(r.id)).map(room=>{
+                    const p = PRESETS.find(x=>x.id===room.preset);
+                    return (
+                      <Link key={room.id} href={`/rooms/${room.id}`} className="theme-card p-4 flex items-center gap-3 hover:scale-[1.01] transition-all">
+                        <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0" style={{background:p?p.bg:'var(--color-secondary)'}}>{p?.emoji||room.name[0].toUpperCase()}</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-sm theme-text flex items-center gap-1.5 truncate">{room.name}<Lock size={12} style={{color:'var(--color-text-muted)'}}/></p>
+                          <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{room.is_private?'Private':'Public'}</p>
+                        </div>
+                        <ArrowRight size={16} style={{color:'var(--color-text-muted)'}}/>
+                      </Link>
+                    );
+                  })}
+                  <button onClick={()=>{ setLockerUnlocked(false); setUnlocked(false); setLockedOpen(false); }} className="w-full py-2.5 rounded-xl text-xs font-bold" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}>Lock again 🔒</button>
+                </div>
+              )}
+            </div>
+          )}
           {rooms.length===0 ? (
             <div className="theme-card p-10 text-center space-y-4">
               <div className="text-5xl">🏠</div>
@@ -165,17 +217,26 @@ function RoomsContent() {
                 <button onClick={()=>setModal('join')} className="theme-btn-outline px-5 py-2.5 text-sm flex items-center gap-2" style={{borderColor:'var(--color-accent)',color:'var(--color-accent)'}}><Search size={15}/>Join Room</button>
               </div>
             </div>
+          ) : rooms.filter(r=>!lockedIds.has(r.id)).length===0 ? (
+            <div className="theme-card p-10 text-center space-y-3">
+              <div className="text-5xl">🔒</div>
+              <p className="font-black theme-text">All your rooms are in the locker</p>
+              <p className="text-sm" style={{color:'var(--color-text-muted)'}}>Tap Locked rooms above and type your code to see them ♡</p>
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {rooms.map(room=>{
+              {rooms.filter(r=>!lockedIds.has(r.id)).map(room=>{
                 const p = PRESETS.find(x=>x.id===room.preset);
+                const isAutumn = profile?.theme === 'autumn';
                 return (
                   <Link key={room.id} href={`/rooms/${room.id}`}
                     className="theme-card overflow-hidden hover:scale-[1.02] transition-all block"
-                    style={{background:p?p.bg:'var(--color-secondary)'}}>
+                    style={isAutumn
+                      ? { background: 'var(--color-surface)', borderTop: `4px solid ${p?.accent || 'var(--color-accent)'}` }
+                      : { background: p?p.bg:'var(--color-secondary)' }}>
                     <div className="p-5">
                       <div className="flex items-center gap-3 mb-3">
-                        <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl" style={{background:'rgba(255,255,255,0.6)'}}>
+                        <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl" style={{background:'rgba(var(--color-overlay-rgb),0.6)'}}>
                           {p?.emoji||room.name[0].toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -188,7 +249,7 @@ function RoomsContent() {
                         <ArrowRight size={16} style={{color:'var(--color-text-muted)'}}/>
                       </div>
                       {room.description && <p className="text-xs line-clamp-2" style={{color:'var(--color-text-muted)'}}>{room.description}</p>}
-                      <div className="mt-2 text-xs font-mono px-2 py-1 rounded-lg inline-block" style={{background:'rgba(255,255,255,0.5)',color:'var(--color-text-muted)'}}>
+                      <div className="mt-2 text-xs font-mono px-2 py-1 rounded-lg inline-block" style={{background:'rgba(var(--color-overlay-rgb),0.5)',color:'var(--color-text-muted)'}}>
                         #{room.invite_code}
                       </div>
                     </div>
