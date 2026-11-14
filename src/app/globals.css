@@ -15,6 +15,7 @@
   --color-border: rgba(169, 201, 245, 0.4);
   --color-hover: rgba(169, 201, 245, 0.15);
   --shadow-themed: 0 4px 20px rgba(169, 201, 245, 0.35);
+  --color-overlay-rgb: 255, 255, 255;
 }
 
 [data-theme="pink"] {
@@ -31,7 +32,26 @@
     --color-bubble-other: #FFFFFF;
     --color-border: rgba(255, 173, 190, 0.5);
     --color-hover: rgba(255, 173, 190, 0.16);
-    --shadow-themed: 0 4px 20px rgba(255, 150, 180, 0.35);  
+    --shadow-themed: 0 4px 20px rgba(255, 150, 180, 0.35);
+    --color-overlay-rgb: 255, 255, 255;
+}
+
+[data-theme="autumn"] {
+  --color-primary: #E8A15C;
+  --color-secondary: #3A2A20;
+  --color-bg: #241811;
+  --color-surface: #2E2018;
+  --color-text: #F7EBDD;
+  --color-text-muted: #C9A98F;
+  --color-accent: #E07B39;
+  --color-primary-alpha: rgba(232, 161, 92, 0.25);
+  --color-accent-alpha: rgba(224, 123, 57, 0.18);
+  --color-bubble-mine: #6B3F22;
+  --color-bubble-other: #3A2A20;
+  --color-border: rgba(232, 161, 92, 0.28);
+  --color-hover: rgba(232, 161, 92, 0.12);
+  --shadow-themed: 0 4px 20px rgba(0, 0, 0, 0.45);
+  --color-overlay-rgb: 43, 29, 22;
 }
 
 * {
