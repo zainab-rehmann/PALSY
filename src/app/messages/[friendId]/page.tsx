@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
@@ -14,6 +14,8 @@ import { wallpaperStyle } from '@/lib/wallpapers';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import LockerPrompt from '@/components/LockerPrompt';
+import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
 
@@ -53,6 +55,40 @@ export default function DMPage() {
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'clear' | 'deleteSelected' | null>(null);
   const [sendError, setSendError] = useState('');
+  // Chat locker (optional, personal): a locked chat shows only the code
+  // prompt — messages are not even loaded until the code matches.
+  const [gated, setGated] = useState(false);
+  const [gateTick, setGateTick] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
+  const [hasCode, setHasCode] = useState(false);
+  const [lockerError, setLockerError] = useState('');
+  const [lockerBusy, setLockerBusy] = useState(false);
+
+  async function submitLockerCode(code: string) {
+    setLockerBusy(true); setLockerError('');
+    const supabase = createClient();
+    const ok = await verifyLockerCode(supabase, code);
+    setLockerBusy(false);
+    if (ok) { setLockerUnlocked(true); setGated(false); setLoading(true); setGateTick(t=>t+1); }
+    else setLockerError("That code doesn't match — try again.");
+  }
+
+  async function toggleLock() {
+    setShowChatMenu(false);
+    const supabase = createClient();
+    if (isLocked) {
+      const err = await unlockChat(supabase, 'dm', friendId);
+      if (!err) setIsLocked(false);
+      return;
+    }
+    if (!hasCode) {
+      alert('Set a locker code first in Settings → Account, then lock this chat ♡');
+      router.push('/settings');
+      return;
+    }
+    const err = await lockChat(supabase, 'dm', friendId);
+    if (!err) router.replace('/messages');
+  }
   // Reply / pin / star
   const [replyTo, setReplyTo] = useState<Message|null>(null);
   const [quotedMap, setQuotedMap] = useState<Record<string, Message | null>>({});
@@ -81,6 +117,17 @@ export default function DMPage() {
 
       const { data: fr } = await supabase.from('profiles').select('*').eq('id', friendId).single();
       setFriend(fr);
+
+      // Locker gate: locked chats load nothing until the code matches.
+      const locked = await getLockedChats(supabase);
+      const lockedHere = locked.some(l=>l.chat_type==='dm' && l.target_id===friendId);
+      setIsLocked(lockedHere);
+      setHasCode(await hasLockerCode(supabase));
+      if (lockedHere && !isLockerUnlocked()) {
+        setGated(true);
+        setLoading(false);
+        return;
+      }
 
       // Load messages — NEWEST first, then display oldest-to-newest.
       // (The old query loaded the OLDEST 100, so recent messages vanished
@@ -165,7 +212,7 @@ export default function DMPage() {
       liveChannels = [channel, tChan, profileChannel, presenceChannel];
     })();
     return () => { liveChannels.forEach(c => { try { supabase.removeChannel(c); } catch {} }); };
-  }, [router, friendId]);
+  }, [router, friendId, gateTick]);
 
   // Scroll to bottom only when the newest message changes (a new arrival
   // or the first load) — never when older history is prepended.
@@ -637,6 +684,18 @@ async function addReaction(msgId: string, emoji: string) {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0,1,2].map(i=><div key={i} style={{width:10,height:10,borderRadius:'50%',background:'var(--color-accent)',animation:'float 1s ease-in-out infinite',animationDelay:`${i*0.2}s`}}/>)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
 
+  if (gated) return (
+    <div className="min-h-screen theme-bg flex flex-col">
+      <header className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)'}}>
+        <Link href="/messages" className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><ArrowLeft size={18} style={{color:'var(--color-accent)'}}/></Link>
+        <p className="font-black text-sm theme-text flex items-center gap-1.5"><Lock size={14} style={{color:'var(--color-accent)'}}/>Locked chat</p>
+      </header>
+      <div className="flex-1 flex items-center justify-center p-4">
+        <LockerPrompt error={lockerError} busy={lockerBusy} onSubmit={submitLockerCode} onCancel={()=>router.replace('/messages')} />
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-screen theme-bg">
       {/* Header */}
@@ -668,6 +727,7 @@ async function addReaction(msgId: string, emoji: string) {
                 <button onClick={exportChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:'var(--color-accent)'}}/> Export chat</button>
                 <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:'var(--color-accent)'}}/> Starred messages</button>
                 <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:'var(--color-accent)'}}/> Select messages</button>
+                <button onClick={toggleLock} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}>{isLocked?<LockOpen size={16} style={{color:'var(--color-accent)'}}/>:<Lock size={16} style={{color:'var(--color-accent)'}}/>} {isLocked?'Unlock chat':'Lock chat'}</button>
                 <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'#FF6B6B'}}><Trash2 size={16}/> Clear chat</button>
               </div>
             </>
@@ -691,7 +751,7 @@ async function addReaction(msgId: string, emoji: string) {
 
       {/* Messages */}
       {/* Messages — my own wallpaper, only I see it */}
-      <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper)}>
+      <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
         {hasMore && messages.length > 0 && (
           <div className="flex justify-center pb-1">
             <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-accent)',border:'1px solid var(--color-border)'}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
