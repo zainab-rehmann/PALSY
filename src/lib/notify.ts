@@ -5,6 +5,12 @@
 // row we also send a tiny live broadcast on the recipient's own channel.
 // The bell and the pop-up notifier listen for it and re-read their rows.
 import type { Profile, Room, RoomMember } from '@/types';
+import { isChatLockedFor } from './locker';
+
+// Locked chats get NO previews anywhere: no sender name, no message
+// text, in the bell or in pop-ups — just a generic nudge.
+const LOCKED_TITLE = '🔒 New message';
+const LOCKED_BODY = 'You have a new message — unlock your locker to read it ♡';
 
 type Sb = ReturnType<typeof import('@/lib/supabase/client').createClient>;
 
@@ -61,7 +67,10 @@ export async function notifyDM(
   content: string | null,
 ): Promise<void> {
   try {
-    await push(supabase, receiverId, 'message', `${displayName(sender, 'A friend')} ♡`, messagePreview(type, content), {
+    const locked = await isChatLockedFor(supabase, receiverId, 'dm', sender.id);
+    await push(supabase, receiverId, 'message',
+      locked ? LOCKED_TITLE : `${displayName(sender, 'A friend')} ♡`,
+      locked ? LOCKED_BODY : messagePreview(type, content), {
       sender_id: sender.id, dedupe_key: `dm:${sender.id}`,
     });
     void pokeBell(supabase, receiverId);
@@ -82,7 +91,10 @@ export async function notifyRoom(
     const preview = messagePreview(type, content);
     const targets = members.filter((m) => m.user_id !== sender.id && !m.muted);
     for (const t of targets) {
-      await push(supabase, t.user_id, 'room_message', `${room.name} ♡`, `${displayName(sender, 'Someone')}: ${preview}`, {
+      const locked = await isChatLockedFor(supabase, t.user_id, 'room', room.id);
+      await push(supabase, t.user_id, 'room_message',
+        locked ? LOCKED_TITLE : `${room.name} ♡`,
+        locked ? LOCKED_BODY : `${displayName(sender, 'Someone')}: ${preview}`, {
         room_id: room.id, sender_id: sender.id, dedupe_key: `room:${room.id}`,
       });
       void pokeBell(supabase, t.user_id);
@@ -109,7 +121,10 @@ export async function notifyGame(
     const gameName = label[gameType] || 'a game';
     for (const m of (members || [])) {
       if (m.user_id === sender.id || m.muted) continue;
-      await push(supabase, m.user_id, 'game', `New game in ${room.name}! 🎮`, `${displayName(sender, 'Someone')} started ${gameName} — come play!`, {
+      const locked = await isChatLockedFor(supabase, m.user_id, 'room', room.id);
+      await push(supabase, m.user_id, 'game',
+        locked ? LOCKED_TITLE : `New game in ${room.name}! 🎮`,
+        locked ? LOCKED_BODY : `${displayName(sender, 'Someone')} started ${gameName} — come play!`, {
         room_id: room.id, game_id: gameId, game_type: gameType, sender_id: sender.id, dedupe_key: `game:${gameId}`,
       });
       void pokeBell(supabase, m.user_id);
