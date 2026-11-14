@@ -13,12 +13,16 @@ export default function LockerPrompt({
   onSubmit,
   onCancel,
   submitLabel = 'Unlock ♡',
+  title = 'Locked chats 🔒',
+  subtitle = 'Type your locker code to see your locked chats. A wrong code shows nothing — your chats stay hidden ♡',
 }: {
   error: string;
   busy: boolean;
   onSubmit: (code: string) => void;
   onCancel: () => void;
   submitLabel?: string;
+  title?: string;
+  subtitle?: string;
 }) {
   const [code, setCode] = useState('');
 
@@ -28,9 +32,9 @@ export default function LockerPrompt({
         <Lock size={26} />
       </div>
       <div>
-        <p className="font-black text-lg theme-text">Locked chats 🔒</p>
+        <p className="font-black text-lg theme-text">{title}</p>
         <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
-          Type your locker code to see your locked chats. A wrong code shows nothing — your chats stay hidden ♡
+          {subtitle}
         </p>
       </div>
       <form
