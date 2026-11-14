@@ -117,6 +117,7 @@ export async function notifyGame(
     const label: Record<string, string> = {
       tictactoe: 'Tic Tac Toe', hangman: 'Hangman',
       numberguess: 'Number Guess', rps: 'Rock Paper Scissors',
+      'draw-guess': 'Draw & Guess', trivia: 'Trivia Duel',
     };
     const gameName = label[gameType] || 'a game';
     for (const m of (members || [])) {
