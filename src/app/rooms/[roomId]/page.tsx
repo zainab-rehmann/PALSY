@@ -216,16 +216,19 @@ export default function RoomPage() {
     const ordered = [...(msgs||[])].reverse();
     setMessages(ordered);
     setHasMore((msgs||[]).length === CHAT_PAGE_SIZE);
-    setLoading(false);
 
-    // Room ticks: load existing receipts, then stamp my own delivery
-    // (and read, when the chat is in view) for others' messages.
+    // Room ticks: load existing receipts BEFORE first paint, so ticks
+    // never flash the wrong state when the room opens.
     const { data: rcpts } = await supabase.from('message_receipts').select('*').eq('room_id', roomId);
     if (rcpts) {
       const map: Record<string, MessageReceipt[]> = {};
       (rcpts as MessageReceipt[]).forEach(r => { (map[r.message_id] ||= []).push(r); });
       setReceipts(map);
     }
+    setLoading(false);
+
+    // Stamp my own delivery (and read, when the chat is in view) for
+    // others' messages.
     const othersIds = ordered.filter(m => m.sender_id !== user.id).map(m => m.id);
     await stampReceipts(supabase, roomId, user.id, othersIds, false);
     if (document.visibilityState === 'visible') {
