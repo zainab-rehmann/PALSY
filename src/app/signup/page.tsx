@@ -14,7 +14,7 @@ export default function SignupPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [theme, setTheme] = useState<'blue'|'pink'>('blue');
+  const [theme, setTheme] = useState<'blue'|'pink'|'autumn'>('blue');
   const [showPw, setShowPw] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -96,18 +96,22 @@ export default function SignupPage() {
             <label className="text-xs font-bold mb-2 block flex items-center gap-1.5" style={{color:'var(--color-text-muted)'}}>
               <Palette size={12}/> Choose your theme
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              {(['blue','pink'] as const).map(t=>(
-                <button key={t} type="button" onClick={()=>setTheme(t)}
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                { id: 'blue', label: '💙 Soft Blue', bg: '#DCEBFF', color: '#34445C', border: '#7CA8E8', shadow: 'rgba(169,201,245,0.4)' },
+                { id: 'pink', label: '🩷 Soft Pink', bg: '#FCE3EE', color: '#614556', border: '#E99ABD', shadow: 'rgba(242,187,210,0.4)' },
+                { id: 'autumn', label: '🍂 Autumn Dark', bg: '#2E2018', color: '#F7EBDD', border: '#E07B39', shadow: 'rgba(224,123,57,0.4)' },
+              ] as const).map(t=>(
+                <button key={t.id} type="button" onClick={()=>setTheme(t.id)}
                   className="p-3 rounded-2xl border-2 text-sm font-bold transition-all"
                   style={{
-                    background: t==='blue'?'#DCEBFF':'#FCE3EE',
-                    color: t==='blue'?'#34445C':'#614556',
-                    borderColor: theme===t ? (t==='blue'?'#7CA8E8':'#E99ABD') : 'transparent',
-                    transform: theme===t?'scale(1.02)':'scale(1)',
-                    boxShadow: theme===t?`0 4px 12px ${t==='blue'?'rgba(169,201,245,0.4)':'rgba(242,187,210,0.4)'}`:undefined,
+                    background: t.bg,
+                    color: t.color,
+                    borderColor: theme===t.id ? t.border : 'transparent',
+                    transform: theme===t.id?'scale(1.02)':'scale(1)',
+                    boxShadow: theme===t.id?`0 4px 12px ${t.shadow}`:undefined,
                   }}>
-                  {t==='blue'?'💙 Soft Blue':'🩷 Soft Pink'}
+                  {t.label}
                 </button>
               ))}
             </div>
