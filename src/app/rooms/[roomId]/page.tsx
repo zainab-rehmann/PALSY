@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room, RoomMember, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
 import {
-  ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, Hash, Lock,
+  ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, Hash, Lock, LockOpen,
   Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star
 } from 'lucide-react';
 import Link from 'next/link';
@@ -19,6 +19,8 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import EntryCodePrompt from '@/components/EntryCodePrompt';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
 import { wallpaperStyle } from '@/lib/wallpapers';
+import LockerPrompt from '@/components/LockerPrompt';
+import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 
 const PRESETS: Record<string,{bg:string;accent:string;emoji:string}> = {
   'cloudy-blue':{bg:'#DCEBFF',accent:'#7CA8E8',emoji:'☁️'},
@@ -94,6 +96,39 @@ export default function RoomPage() {
   const [codeBusy, setCodeBusy] = useState(false);
   const [savedCode, setSavedCode] = useState('');
   const [codeCopied, setCodeCopied] = useState(false);
+  // Chat locker (optional, personal): a locked room shows only the code
+  // prompt — messages are not even loaded until the code matches.
+  const [gated, setGated] = useState(false);
+  const [gateTick, setGateTick] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
+  const [hasCode, setHasCode] = useState(false);
+  const [lockerError, setLockerError] = useState('');
+  const [lockerBusy, setLockerBusy] = useState(false);
+
+  async function submitLockerCode(code: string) {
+    setLockerBusy(true); setLockerError('');
+    const supabase = createClient();
+    const ok = await verifyLockerCode(supabase, code);
+    setLockerBusy(false);
+    if (ok) { setLockerUnlocked(true); setGated(false); setLoading(true); setGateTick(t=>t+1); }
+    else setLockerError("That code doesn't match — try again.");
+  }
+
+  async function toggleRoomLock() {
+    const supabase = createClient();
+    if (isLocked) {
+      const err = await unlockChat(supabase, 'room', roomId);
+      if (!err) setIsLocked(false);
+      return;
+    }
+    if (!hasCode) {
+      alert('Set a locker code first in Settings → Account, then lock this room ♡');
+      router.push('/settings');
+      return;
+    }
+    const err = await lockChat(supabase, 'room', roomId);
+    if (!err) router.replace('/rooms');
+  }
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -138,6 +173,17 @@ export default function RoomPage() {
     }
     setMyRole(myMembership.role);
 
+    // Locker gate: locked rooms load nothing until the code matches.
+    const locked = await getLockedChats(supabase);
+    const lockedHere = locked.some(l=>l.chat_type==='room' && l.target_id===roomId);
+    setIsLocked(lockedHere);
+    setHasCode(await hasLockerCode(supabase));
+    if (lockedHere && !isLockerUnlocked()) {
+      setGated(true);
+      setLoading(false);
+      return;
+    }
+
     const { data: msgs } = await supabase.from('messages')
       .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
       .eq('room_id', roomId).eq('is_deleted', false)
@@ -168,7 +214,7 @@ export default function RoomPage() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [router, roomId]);
+  }, [router, roomId, gateTick]);
 
   useEffect(() => { load(); }, [load]);
   // Scroll to bottom only when the newest message changes — never when
@@ -680,10 +726,13 @@ export default function RoomPage() {
 
   const preset = room.preset ? PRESETS[room.preset] : null;
   const accentColor = preset?.accent || room.accent_color || 'var(--color-accent)';
+  // Dark (autumn) theme wins over the room's light preset background,
+  // so rooms stay readable; the preset accent colour is kept.
+  const pageBg = profile?.theme === 'autumn' ? 'var(--color-bg)' : (preset?.bg || 'var(--color-bg)');
 
   if (needsCode) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 theme-bg" style={{background:preset?.bg||'var(--color-bg)'}}>
+      <div className="min-h-screen flex items-center justify-center p-4 theme-bg" style={{background:pageBg}}>
         <EntryCodePrompt
           roomName={room.name}
           accentColor={accentColor}
@@ -697,33 +746,47 @@ export default function RoomPage() {
     );
   }
 
+  if (gated) {
+    return (
+      <div className="min-h-screen flex flex-col theme-bg" style={{background:pageBg}}>
+        <header className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.9)',borderBottom:'1px solid var(--color-border)'}}>
+          <Link href="/rooms" className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}><ArrowLeft size={18} style={{color:accentColor}}/></Link>
+          <p className="font-black text-sm theme-text flex items-center gap-1.5"><Lock size={14} style={{color:accentColor}}/>Locked room</p>
+        </header>
+        <div className="flex-1 flex items-center justify-center p-4">
+          <LockerPrompt error={lockerError} busy={lockerBusy} onSubmit={submitLockerCode} onCancel={()=>router.replace('/rooms')} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-screen" style={{background:preset?.bg||'var(--color-bg)'}}>
+    <div className="flex flex-col h-screen" style={{background:pageBg}}>
       {/* Header */}
       {selectMode && tab==='chat' ? (
-        <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(255,255,255,0.4)'}}>
-          <button onClick={()=>{setSelectMode(false); setSelectedIds(new Set());}} className="p-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}><X size={18} style={{color:accentColor}}/></button>
+        <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(var(--color-overlay-rgb),0.4)'}}>
+          <button onClick={()=>{setSelectMode(false); setSelectedIds(new Set());}} className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}><X size={18} style={{color:accentColor}}/></button>
           <p className="font-black text-sm theme-text flex-1">{selectedIds.size} selected</p>
-          <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-') && canSelect(m)).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)',color:'var(--color-text)'}}>Select all</button>
+          <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-') && canSelect(m)).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)',color:'var(--color-text)'}}>Select all</button>
           <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#FF6B6B',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
         </header>
       ) : (
-      <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(255,255,255,0.4)'}}>
-        <Link href="/rooms" className="p-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}><ArrowLeft size={18} style={{color:accentColor}}/></Link>
+      <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(var(--color-overlay-rgb),0.4)'}}>
+        <Link href="/rooms" className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}><ArrowLeft size={18} style={{color:accentColor}}/></Link>
                   {room.avatar_url
 ? <img src={room.avatar_url} alt={room.name} className="w-9 h-9 rounded-xl object-cover"/>
-: <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{background:'rgba(255,255,255,0.7)'}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
+: <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
         <div className="flex-1 min-w-0">
           <p className="font-black text-sm theme-text truncate flex items-center gap-1.5">{room.name}{room.has_entry_code && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{background:`${accentColor}22`,color:accentColor}}><KeyRound size={10}/>Entry code</span>}</p>
           <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{members.length} members · {members.filter(m=>isFreshOnline((m.profile as Profile)||null)).length} online</p>
         </div>
         {/* Share */}
-        <button onClick={copyInviteCode} className="p-2 rounded-xl transition-all" style={{background:'rgba(255,255,255,0.7)'}}>
+        <button onClick={copyInviteCode} className="p-2 rounded-xl transition-all" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
           {copied?<Check size={16} style={{color:'#4ADE80'}}/>:<Share2 size={16} style={{color:accentColor}}/>}
         </button>
         {tab==='chat' && (
           <div className="relative">
-            <button onClick={()=>setShowChatMenu(v=>!v)} className="p-2 rounded-xl transition-all" style={{background:'rgba(255,255,255,0.7)'}} title="Chat options"><MoreVertical size={16} style={{color:accentColor}}/></button>
+            <button onClick={()=>setShowChatMenu(v=>!v)} className="p-2 rounded-xl transition-all" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}} title="Chat options"><MoreVertical size={16} style={{color:accentColor}}/></button>
             {showChatMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={()=>setShowChatMenu(false)}/>
@@ -746,7 +809,7 @@ export default function RoomPage() {
       )}
 
       {/* Tab bar */}
-      <div className="flex px-4 pt-3 gap-1 flex-shrink-0" style={{background:'rgba(255,255,255,0.7)'}}>
+      <div className="flex px-4 pt-3 gap-1 flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
         {(['chat','members','games','settings'] as Tab[]).map(t=>(
           <button key={t} onClick={()=>setTab(t)}
             className="px-4 py-2 rounded-t-xl text-xs font-bold capitalize transition-all"
@@ -761,20 +824,20 @@ export default function RoomPage() {
         {tab==='chat' && (
           <>
             {jumpNote && (
-              <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,255,255,0.85)',color:'var(--color-text-muted)'}}>{jumpNote} <button onClick={()=>setJumpNote('')} className="underline ml-1">Dismiss</button></div>
+              <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.85)',color:'var(--color-text-muted)'}}>{jumpNote} <button onClick={()=>setJumpNote('')} className="underline ml-1">Dismiss</button></div>
             )}
             {pinnedList.length > 0 && (
-              <button onClick={()=>{ const next = (pinIndex + 1) % pinnedList.length; setPinIndex(next); jumpToMessage(pinnedList[next].id); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',borderBottom:`1px solid ${accentColor}33`}}>
+              <button onClick={()=>{ const next = (pinIndex + 1) % pinnedList.length; setPinIndex(next); jumpToMessage(pinnedList[next].id); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.9)',borderBottom:`1px solid ${accentColor}33`}}>
                 <Pin size={14} style={{color:accentColor}} className="flex-shrink-0"/>
                 <span className="text-xs font-bold truncate" style={{color:'var(--color-text)'}}>{senderName(pinnedList[pinIndex % pinnedList.length], pinnedList[pinIndex % pinnedList.length].sender_id === profile?.id ? 'You' : 'Member')}: <span className="font-normal" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(pinnedList[pinIndex % pinnedList.length])}</span></span>
                 {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:accentColor}}>{pinnedList.length} pinned · tap to cycle</span>}
               </button>
             )}
             {/* Messages — my own wallpaper, only I see it */}
-            <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper)}>
+            <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
               {hasMore && messages.length > 0 && (
                 <div className="flex justify-center pb-1">
-                  <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'rgba(255,255,255,0.9)',color:accentColor,border:`1px solid ${accentColor}33`}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
+                  <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'rgba(var(--color-overlay-rgb),0.9)',color:accentColor,border:`1px solid ${accentColor}33`}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
                 </div>
               )}
               {/* Welcome message */}
@@ -791,7 +854,7 @@ export default function RoomPage() {
                 const prev = messages[i-1];
                 const divider = (!prev || !sameDay(prev.created_at, msg.created_at)) ? (
                   <div className="flex justify-center py-1">
-                    <span className="text-[11px] font-bold px-3 py-1 rounded-full" style={{background:'rgba(255,255,255,0.9)',color:'var(--color-text-muted)',border:`1px solid ${accentColor}33`}}>{dayDividerLabel(msg.created_at)}</span>
+                    <span className="text-[11px] font-bold px-3 py-1 rounded-full" style={{background:'rgba(var(--color-overlay-rgb),0.9)',color:'var(--color-text-muted)',border:`1px solid ${accentColor}33`}}>{dayDividerLabel(msg.created_at)}</span>
                   </div>
                 ) : null;
                 const selected = selectedIds.has(msg.id);
@@ -799,7 +862,7 @@ export default function RoomPage() {
                 return (
                   <Fragment key={msg.id}>
                     {divider}
-                  <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`} style={highlightId===msg.id?{background:'rgba(255,255,255,0.6)',borderRadius:16,outline:`2px solid ${accentColor}`,outlineOffset:2}:selected?{background:'rgba(255,255,255,0.6)',borderRadius:16}:undefined} onClick={selectMode && selectable ? ()=>toggleSelect(msg.id) : undefined}>
+                  <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`} style={highlightId===msg.id?{background:'rgba(var(--color-overlay-rgb),0.6)',borderRadius:16,outline:`2px solid ${accentColor}`,outlineOffset:2}:selected?{background:'rgba(var(--color-overlay-rgb),0.6)',borderRadius:16}:undefined} onClick={selectMode && selectable ? ()=>toggleSelect(msg.id) : undefined}>
                     {selectMode && selectable && (
                       <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?accentColor:'rgba(0,0,0,0.25)',background:selected?accentColor:'transparent',color:'#fff'}}>
                         {selected && <Check size={14}/>}
@@ -809,7 +872,7 @@ export default function RoomPage() {
                     <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-0.5`}>
                       {!mine && <span className="text-xs font-bold px-1" style={{color:accentColor}}>{sender?.display_name||sender?.username}</span>}
                       <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
-                        style={{background:mine?accentColor+22:'rgba(255,255,255,0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:'var(--color-text)'}}
+                        style={{background:mine?accentColor+22:'rgba(var(--color-overlay-rgb),0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:'var(--color-text)'}}
                         onContextMenu={e=>{if(!selectMode){e.preventDefault();setMenuBelow(e.clientY < 240);setActionMsg(msg.id);}}}
                         onTouchStart={(e)=>{if(!selectMode) startPress(msg.id, e.touches[0]?.clientY);}} onTouchEnd={endPress} onTouchMove={endPress}
                         onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}>
@@ -883,12 +946,12 @@ export default function RoomPage() {
               <div ref={bottomRef}/>
             </div>
             {Object.values(typingUsers).length > 0 && (
-              <div className="px-4 py-1.5 text-xs flex-shrink-0" style={{background:'rgba(255,255,255,0.85)',color:'var(--color-text-muted)'}}>
+              <div className="px-4 py-1.5 text-xs flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.85)',color:'var(--color-text-muted)'}}>
                 <span className="font-semibold" style={{color:accentColor}}>{Object.values(typingUsers)[0]}</span>
                 {Object.values(typingUsers).length > 1 ? ' and others are typing' : ' is typing'}<span className="animate-pulse">…</span>
               </div>
             )}
-            <form onSubmit={sendMessage} className="relative flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'rgba(255,255,255,0.9)',backdropFilter:'blur(8px)',borderTop:`1px solid ${accentColor}22`}}>
+            <form onSubmit={sendMessage} className="relative flex items-end gap-2 p-4 safe-bottom flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.9)',backdropFilter:'blur(8px)',borderTop:`1px solid ${accentColor}22`}}>
               {showEmojis && (
                 <div className="absolute left-4 z-30" style={{bottom:'calc(100% + 8px)'}}>
                   <EmojiPicker onPick={(e)=>{setInput(prev=>prev+e); inputRef.current?.focus();}} />
@@ -923,7 +986,7 @@ export default function RoomPage() {
                 onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
                 placeholder="Say something nice... ♡" rows={1}
                 className="flex-1 py-3 px-4 rounded-2xl resize-none text-sm"
-                style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}44`,outline:'none',minHeight:44,maxHeight:100,fontFamily:"'Nunito',sans-serif"}}/>
+                style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}44`,outline:'none',minHeight:44,maxHeight:100,fontFamily:"'Nunito',sans-serif"}}/>
               <button type="submit" disabled={!input.trim()} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-110" style={{background:accentColor,color:'white'}}>
                 <Send size={16}/>
               </button>
@@ -936,7 +999,7 @@ export default function RoomPage() {
             {members.map(m=>{
               const mp = m.profile as Profile;
               return (
-                <div key={m.id} className="flex items-center gap-3 p-3 rounded-2xl" style={{background:'rgba(255,255,255,0.7)'}}>
+                <div key={m.id} className="flex items-center gap-3 p-3 rounded-2xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
                   <div className="relative"><Avatar profile={mp||{}} size={40}/><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{background:isFreshOnline(mp)?'#4ADE80':'#9CA3AF'}}/></div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-sm theme-text flex items-center gap-1.5">
@@ -958,7 +1021,7 @@ export default function RoomPage() {
 
         {tab==='settings' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
+            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
               <h3 className="font-black theme-text">Room Picture</h3>
               <div className="flex items-center gap-3">
                 {room.avatar_url
@@ -976,7 +1039,7 @@ export default function RoomPage() {
               </div>
               <input ref={roomPicRef} type="file" accept="image/*" className="hidden" onChange={uploadRoomPic}/>
             </div>
-            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
+            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
               <h3 className="font-black theme-text">Room Theme</h3>
               <div className="grid grid-cols-3 gap-2">
                 {Object.entries(PRESETS).map(([key,p])=>(
@@ -990,7 +1053,7 @@ export default function RoomPage() {
               </div>
               {myRole!=='owner' && <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Only the room owner can change the theme.</p>}
             </div>
-            <div className="rounded-2xl p-4" style={{background:'rgba(255,255,255,0.8)'}}>
+            <div className="rounded-2xl p-4" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
               <div className="flex items-center gap-3">
                 <div className="flex-1">
                   <h3 className="font-black theme-text flex items-center gap-2">{myMuted ? <BellOff size={16}/> : <Bell size={16}/>} Room Notifications</h3>
@@ -1002,7 +1065,7 @@ export default function RoomPage() {
               </div>
             </div>
             {myRole==='owner' && (
-              <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
+              <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
                 <div className="flex items-center gap-2">
                   <h3 className="font-black theme-text flex-1 flex items-center gap-2"><KeyRound size={16}/> Entry Code</h3>
                   <span className="text-[11px] font-bold px-2.5 py-1 rounded-full" style={{background: room.has_entry_code ? `${accentColor}22` : 'var(--color-secondary)', color: room.has_entry_code ? accentColor : 'var(--color-text-muted)'}}>
@@ -1042,7 +1105,21 @@ export default function RoomPage() {
                 <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Only you can change or remove it. If you forget it, just set a new one — the old code stops working right away.</p>
               </div>
             )}
-            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(255,255,255,0.8)'}}>
+            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
+              <div className="flex items-center gap-2">
+                <h3 className="font-black theme-text flex-1 flex items-center gap-2"><Lock size={16}/> Chat Locker</h3>
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full" style={{background: isLocked ? `${accentColor}22` : 'var(--color-secondary)', color: isLocked ? accentColor : 'var(--color-text-muted)'}}>
+                  {isLocked ? '🔒 Locked' : 'Unlocked'}
+                </span>
+              </div>
+              <p className="text-xs" style={{color:'var(--color-text-muted)'}}>
+                Personal and optional: locking hides this room from YOUR rooms list and hides its message previews in notifications. Other members are not affected. It needs your locker code from Settings → Account.
+              </p>
+              <button onClick={toggleRoomLock} className="w-full py-2.5 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-2" style={{background:accentColor}}>
+                {isLocked ? <><LockOpen size={14}/> Unlock this room</> : <><Lock size={14}/> Lock this room</>}
+              </button>
+            </div>
+            <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
               <h3 className="font-black theme-text">Room Info</h3>
               <div>
                 <p className="text-xs font-bold mb-1" style={{color:'var(--color-text-muted)'}}>Invite Code</p>
@@ -1292,7 +1369,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         {Object.entries(GAME_META).map(([type, meta])=>(
           <button key={type} onClick={()=>startGame(type)}
             className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]"
-            style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+            style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}33`}}>
             <span className="text-3xl">{meta.emoji}</span>
             <span className="font-black text-sm theme-text">{meta.name}</span>
             <span className="text-xs" style={{color:'var(--color-text-muted)'}}>{meta.desc}</span>
@@ -1305,7 +1382,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <div className="flex items-center gap-2 mb-4">
-        <button onClick={closeGame} className="p-2 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}>
+        <button onClick={closeGame} className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
           <ArrowLeft size={16} style={{color:accentColor}}/>
         </button>
         <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':'Hangman'}</span>
@@ -1371,7 +1448,7 @@ function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any
         {state.board.map((cell: any, i: number)=>(
           <button key={i} onClick={()=>makeMove(i)} disabled={!canPlay || !!state.winner}
             className="aspect-square rounded-2xl text-3xl font-black flex items-center justify-center transition-all hover:scale-105"
-            style={{background:cell?`${accentColor}22`:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}44`,color:accentColor,opacity:(!canPlay||state.winner)?0.6:1}}>
+            style={{background:cell?`${accentColor}22`:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}44`,color:accentColor,opacity:(!canPlay||state.winner)?0.6:1}}>
             {cell?.symbol}
           </button>
         ))}
@@ -1435,7 +1512,7 @@ function RPS({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
             {[{v:'rock',e:'✊'},{v:'paper',e:'✋'},{v:'scissors',e:'✌️'}].map(opt=>(
               <button key={opt.v} onClick={()=>choose(opt.v)}
                 className="w-20 h-20 rounded-2xl flex flex-col items-center justify-center gap-1 text-3xl transition-all hover:scale-110"
-                style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}44`}}>
+                style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}44`}}>
                 {opt.e}<span className="text-xs font-bold" style={{color:'var(--color-text-muted)'}}>{opt.v}</span>
               </button>
             ))}
@@ -1497,11 +1574,11 @@ function NumberGuess({ game, state, profile, accentColor, canPlay, players, onUp
         <p className="font-bold theme-text">How do you want to play?</p>
         <p className="text-sm" style={{color:'var(--color-text-muted)'}}>One of you picks the secret number, the other one guesses it.</p>
         <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => chooseRole('write')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+          <button onClick={() => chooseRole('write')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}33`}}>
             <span className="text-3xl">✏️</span><span className="font-black text-sm theme-text">Set the number</span>
             <span className="text-xs" style={{color:'var(--color-text-muted)'}}>You pick it, they guess</span>
           </button>
-          <button onClick={() => chooseRole('guess')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+          <button onClick={() => chooseRole('guess')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}33`}}>
             <span className="text-3xl">🔍</span><span className="font-black text-sm theme-text">Guess</span>
             <span className="text-xs" style={{color:'var(--color-text-muted)'}}>They pick it, you guess</span>
           </button>
@@ -1549,7 +1626,7 @@ function NumberGuess({ game, state, profile, accentColor, canPlay, players, onUp
       ) : null}
       <div className="space-y-2 max-h-48 overflow-y-auto">
         {[...(state.guesses || [])].reverse().map((g:any,i:number)=>(
-          <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl" style={{background:'rgba(255,255,255,0.7)'}}>
+          <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
             <span className="font-black text-lg" style={{color:g.correct?'#4ADE80':accentColor}}>{g.value}</span>
             <span className="text-sm" style={{color:g.correct?'#4ADE80':'var(--color-text-muted)'}}>{g.correct?'✅ Correct!':g.hint}</span>
             <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{g.player===profile?.id?'You':'Them'}</span>
@@ -1624,11 +1701,11 @@ function Hangman({ game, state, profile, accentColor, canPlay, players, onUpdate
         <p className="font-bold theme-text">How do you want to play?</p>
         <p className="text-sm" style={{color:'var(--color-text-muted)'}}>One of you writes the word, the other one guesses it letter by letter.</p>
         <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => chooseRole('write')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+          <button onClick={() => chooseRole('write')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}33`}}>
             <span className="text-3xl">✏️</span><span className="font-black text-sm theme-text">Write the word</span>
             <span className="text-xs" style={{color:'var(--color-text-muted)'}}>You choose it, they guess</span>
           </button>
-          <button onClick={() => chooseRole('guess')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(255,255,255,0.8)',border:`2px solid ${accentColor}33`}}>
+          <button onClick={() => chooseRole('guess')} className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]" style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}33`}}>
             <span className="text-3xl">🔍</span><span className="font-black text-sm theme-text">Guess</span>
             <span className="text-xs" style={{color:'var(--color-text-muted)'}}>They write it, you guess</span>
           </button>
@@ -1664,7 +1741,7 @@ function Hangman({ game, state, profile, accentColor, canPlay, players, onUpdate
 
   return (
     <div className="space-y-4 text-center">
-      <div className="p-4 rounded-2xl" style={{background:'rgba(255,255,255,0.7)'}}>
+      <div className="p-4 rounded-2xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
         <p className="text-xs font-bold mb-1" style={{color:'var(--color-text-muted)'}}>
           {`Wrong guesses: ${wrongGuesses.length}/${maxWrong} · Remaining: ${remaining}`}
         </p>
@@ -1680,7 +1757,7 @@ function Hangman({ game, state, profile, accentColor, canPlay, players, onUpdate
             {alphabet.map(l => (
               <button key={l} onClick={() => guessLetter(l)} disabled={guessed.includes(l) || wrongGuesses.includes(l)}
                 className="w-9 h-9 rounded-xl text-sm font-bold transition-all hover:scale-110"
-                style={{background:guessed.includes(l)?`${accentColor}44`:wrongGuesses.includes(l)?'rgba(255,107,107,0.2)':'rgba(255,255,255,0.8)',color:guessed.includes(l)?accentColor:wrongGuesses.includes(l)?'#FF6B6B':'var(--color-text)',border:`1px solid ${accentColor}33`,opacity:guessed.includes(l)||wrongGuesses.includes(l)?0.5:1}}>
+                style={{background:guessed.includes(l)?`${accentColor}44`:wrongGuesses.includes(l)?'rgba(255,107,107,0.2)':'rgba(var(--color-overlay-rgb),0.8)',color:guessed.includes(l)?accentColor:wrongGuesses.includes(l)?'#FF6B6B':'var(--color-text)',border:`1px solid ${accentColor}33`,opacity:guessed.includes(l)||wrongGuesses.includes(l)?0.5:1}}>
                 {l.toUpperCase()}
               </button>
             ))}
