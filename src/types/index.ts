@@ -1,4 +1,4 @@
-export type Theme = 'blue' | 'pink';
+export type Theme = 'blue' | 'pink' | 'autumn';
 
 export interface Profile {
   id: string;
@@ -141,4 +141,11 @@ export interface AppNotification {
   data: Record<string, string>;
   is_read: boolean;
   created_at: string;
+}
+
+export interface LockedChat {
+  user_id: string;
+  chat_type: 'dm' | 'room';
+  target_id: string;
+  locked_at: string;
 }
