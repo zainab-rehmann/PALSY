@@ -87,9 +87,10 @@ export const WALLPAPERS: WallpaperPreset[] = [
 
 // Resolve a stored wallpaper value to the style for a chat background.
 // Custom uploads get a soft wash so bubbles and text stay readable
-// over any photo. In dark mode (autumn theme) the wash is a dark
-// espresso tint instead, so light wallpapers don't glare.
-const DARK_WASH = 'rgba(36,24,17,0.55)';
+// over any photo. In dark mode (autumn theme) the wash is a strong
+// dark espresso tint, so light wallpapers read as dark surfaces
+// instead of glaring against the dark header and composer.
+const DARK_WASH = 'rgba(36,24,17,0.78)';
 
 export function wallpaperStyle(value: string | null | undefined, dark = false): CSSProperties {
   if (!value || value === 'default') return {};
