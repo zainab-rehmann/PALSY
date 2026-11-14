@@ -754,7 +754,7 @@ export default function RoomPage() {
           <p className="font-black text-sm theme-text flex items-center gap-1.5"><Lock size={14} style={{color:accentColor}}/>Locked room</p>
         </header>
         <div className="flex-1 flex items-center justify-center p-4">
-          <LockerPrompt error={lockerError} busy={lockerBusy} onSubmit={submitLockerCode} onCancel={()=>router.replace('/rooms')} />
+          <LockerPrompt error={lockerError} busy={lockerBusy} onSubmit={submitLockerCode} onCancel={()=>router.replace('/rooms')} title="Locked rooms 🔒" subtitle="Type your locker code to open this locked room. A wrong code shows nothing — the room stays hidden ♡" />
         </div>
       </div>
     );
@@ -2020,7 +2020,11 @@ function DrawGuess({ game, state, profile, accentColor, canPlay, players, onUpda
       const winner = s0 === s1 ? 'draw' : (s0 > s1 ? ids[0] : ids[1]);
       await saveState({ ...state, phase: 'finished', winner }, true);
     } else {
-      await saveState({ ...state, phase: 'playing', round: round + 1, drawerId: otherId || state.drawerId, strokes: [], guesses: [], roundResult: null, roundEndsAt: null }, false);
+      // Swap the drawer: the next drawer is whoever is NOT the current
+      // drawer. (Must be computed from the current drawer, not from the
+      // tapping player — either player may tap Next round.)
+      const nextDrawer = (players || []).find((p: any) => p.user_id !== state.drawerId)?.user_id || otherId || state.drawerId;
+      await saveState({ ...state, phase: 'playing', round: round + 1, drawerId: nextDrawer, strokes: [], guesses: [], roundResult: null, roundEndsAt: null }, false);
     }
   }
 
