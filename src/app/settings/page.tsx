@@ -3,10 +3,18 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import type { Profile } from '@/types';
+import type { Profile, Theme } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
-import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell, Globe, ImagePlus, Check } from 'lucide-react';
+import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell, Globe, ImagePlus, Check, KeyRound, Dices } from 'lucide-react';
 import { WALLPAPERS, wallpaperStyle, isCustomWallpaper } from '@/lib/wallpapers';
+import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
+import { hasLockerCode, setLockerCode, removeLockerCode } from '@/lib/locker';
+
+const THEME_CHOICES: { id: Theme; label: string; emoji: string; bg: string; border: string; text: string; dots: string[] }[] = [
+  { id: 'blue', label: 'Soft Blue', emoji: '💙', bg: '#DCEBFF', border: '#7CA8E8', text: '#34445C', dots: ['#A9C9F5', '#DCEBFF', '#7CA8E8'] },
+  { id: 'pink', label: 'Soft Pink', emoji: '🩷', bg: '#FCE3EE', border: '#E99ABD', text: '#614556', dots: ['#F2BBD2', '#FCE3EE', '#E99ABD'] },
+  { id: 'autumn', label: 'Autumn Dark', emoji: '🍂', bg: '#2E2018', border: '#E07B39', text: '#F7EBDD', dots: ['#E8A15C', '#6B3F22', '#E07B39'] },
+];
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -17,7 +25,7 @@ export default function SettingsPage() {
   const [usernameStatus, setUsernameStatus] = useState<''|'checking'|'available'|'taken'|'invalid'>('');
   const [usernameMsg, setUsernameMsg] = useState('');
   const [bio, setBio] = useState('');
-  const [theme, setTheme] = useState<'blue'|'pink'>('blue');
+  const [theme, setTheme] = useState<Theme>('blue');
   const [wallpaper, setWallpaper] = useState<string>('default');
   const [uploadingWallpaper, setUploadingWallpaper] = useState(false);
   const wallpaperInputRef = useRef<HTMLInputElement>(null);
@@ -32,6 +40,13 @@ export default function SettingsPage() {
   const [notifPermission, setNotifPermission] = useState<string>('unsupported');
   const [isPrivate, setIsPrivate] = useState(false);
   const [privacySaved, setPrivacySaved] = useState(false);
+  const [lockerHasCode, setLockerHasCode] = useState(false);
+  const [lockerCode, setLockerCodeInput] = useState('');
+  const [lockerMsg, setLockerMsg] = useState('');
+  const [lockerBusy, setLockerBusy] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotPw, setForgotPw] = useState('');
+  const [forgotBusy, setForgotBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -48,6 +63,7 @@ export default function SettingsPage() {
       setWallpaper(prof.wallpaper||'default');
       setNotifEnabled(prof.notifications_enabled !== false);
       setIsPrivate(prof.is_private === true);
+      setLockerHasCode(await hasLockerCode(supabase));
       document.documentElement.setAttribute('data-theme', prof.theme||'blue');
       setLoading(false);
     })();
@@ -161,6 +177,41 @@ export default function SettingsPage() {
     if (wallpaperInputRef.current) wallpaperInputRef.current.value = '';
   }
 
+  async function saveLockerCode() {
+    const code = normalizeEntryCode(lockerCode);
+    if (!isValidEntryCode(code)) { setLockerMsg('Locker code must be 4–8 letters or digits.'); return; }
+    setLockerBusy(true);
+    const supabase = createClient();
+    const err = await setLockerCode(supabase, code);
+    setLockerBusy(false);
+    if (err) { setLockerMsg('Could not save just now. Please try again.'); return; }
+    setLockerHasCode(true); setLockerCodeInput('');
+    setLockerMsg('Locker code saved ♡ Now lock any chat from its ⋯ menu, or a room from its Settings tab.');
+  }
+
+  async function removeLocker() {
+    if (!confirm('Remove your locker code? Your locked chats will become visible again.')) return;
+    setLockerBusy(true);
+    const supabase = createClient();
+    const err = await removeLockerCode(supabase);
+    setLockerBusy(false);
+    if (err) { setLockerMsg('Could not remove just now. Please try again.'); return; }
+    setLockerHasCode(false); setLockerMsg('Locker code removed — your chats are all visible again.');
+  }
+
+  async function resetLockerWithPassword() {
+    if (!profile || !forgotPw) return;
+    setForgotBusy(true);
+    const supabase = createClient();
+    const { error: authErr } = await supabase.auth.signInWithPassword({ email: profile.email, password: forgotPw });
+    if (authErr) { setForgotBusy(false); setLockerMsg('That password does not match — try again.'); return; }
+    const err = await removeLockerCode(supabase);
+    setForgotBusy(false); setForgotPw(''); setShowForgot(false);
+    if (err) { setLockerMsg('Could not reset just now. Please try again.'); return; }
+    setLockerHasCode(false);
+    setLockerMsg('Locker reset — your chats are unlocked. A forgotten code can never be retrieved, only reset. Set a new code any time.');
+  }
+
   async function changePassword() {
     if (!newPw || newPw.length < 8) return;
     setPwSaving(true);
@@ -243,19 +294,19 @@ export default function SettingsPage() {
             <div className="theme-card p-6 space-y-5">
               <div>
                 <p className="font-bold mb-3 theme-text">Choose your theme ♡</p>
-                <div className="grid grid-cols-2 gap-4">
-                  {(['blue','pink'] as const).map(t=>(
-                    <button key={t} onClick={()=>setTheme(t)}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {THEME_CHOICES.map(t=>(
+                    <button key={t.id} onClick={()=>setTheme(t.id)}
                       className="p-5 rounded-2xl border-2 transition-all"
                       style={{
-                        background: t==='blue'?'#DCEBFF':'#FCE3EE',
-                        borderColor: theme===t?(t==='blue'?'#7CA8E8':'#E99ABD'):'transparent',
-                        transform: theme===t?'scale(1.03)':'scale(1)',
+                        background: t.bg,
+                        borderColor: theme===t.id?t.border:'transparent',
+                        transform: theme===t.id?'scale(1.03)':'scale(1)',
                       }}>
-                      <div className="text-3xl mb-2">{t==='blue'?'💙':'🩷'}</div>
-                      <p className="font-black text-sm" style={{color:t==='blue'?'#34445C':'#614556'}}>{t==='blue'?'Soft Blue':'Soft Pink'}</p>
+                      <div className="text-3xl mb-2">{t.emoji}</div>
+                      <p className="font-black text-sm" style={{color:t.text}}>{t.label}</p>
                       <div className="flex gap-1.5 mt-2 justify-center">
-                        {(t==='blue'?['#A9C9F5','#DCEBFF','#7CA8E8']:['#F2BBD2','#FCE3EE','#E99ABD']).map(c=>(
+                        {t.dots.map(c=>(
                           <div key={c} className="w-5 h-5 rounded-full" style={{background:c}}/>
                         ))}
                       </div>
@@ -279,7 +330,7 @@ export default function SettingsPage() {
                   ))}
                   {/* Custom upload */}
                   <button onClick={()=>wallpaperInputRef.current?.click()} disabled={uploadingWallpaper} className="rounded-2xl overflow-hidden border-2 transition-all" style={{borderColor: isCustomWallpaper(wallpaper)?'var(--color-accent)':'var(--color-border)', borderStyle:'dashed'}}>
-                    <div className="h-16 p-2 flex items-center justify-center" style={isCustomWallpaper(wallpaper) ? wallpaperStyle(wallpaper) : {background:'var(--color-secondary)'}}>
+                    <div className="h-16 p-2 flex items-center justify-center" style={isCustomWallpaper(wallpaper) ? wallpaperStyle(wallpaper, theme==='autumn') : {background:'var(--color-secondary)'}}>
                       {uploadingWallpaper ? <span className="text-[11px] font-bold" style={{color:'var(--color-text-muted)'}}>Uploading…</span> : <ImagePlus size={22} style={{color:'var(--color-accent)'}}/>}
                     </div>
                     <p className="text-[11px] font-bold py-1.5 theme-text">🖼️ Your photo{isCustomWallpaper(wallpaper) && <Check size={12} className="inline ml-1" style={{color:'var(--color-accent)'}}/>}</p>
@@ -288,7 +339,7 @@ export default function SettingsPage() {
                 <input ref={wallpaperInputRef} type="file" accept="image/*" className="hidden" onChange={uploadWallpaper}/>
                 {/* Live preview */}
                 <div className="mt-4 rounded-2xl overflow-hidden" style={{border:'1px solid var(--color-border)'}}>
-                  <div className="px-4 py-3 space-y-2" style={wallpaperStyle(wallpaper)}>
+                  <div className="px-4 py-3 space-y-2" style={wallpaperStyle(wallpaper, theme==='autumn')}>
                     <div className="flex"><span className="px-3 py-2 rounded-2xl text-xs" style={{background:'var(--color-bubble-other)',border:'1px solid var(--color-border)'}}>This is how your chats will look ♡</span></div>
                     <div className="flex justify-end"><span className="px-3 py-2 rounded-2xl text-xs" style={{background:'var(--color-bubble-mine)'}}>So cute! ✨</span></div>
                     <div className="flex justify-center"><span className="text-[11px] font-bold px-3 py-1 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)',border:'1px solid var(--color-border)'}}>Today</span></div>
@@ -364,6 +415,46 @@ export default function SettingsPage() {
                   Your name, photo and online status are always visible, public or private. Privacy never hides your account — you always stay findable.
                 </p>
                 {privacySaved && <p className="text-xs font-bold" style={{color:'var(--color-accent)'}}>Saved ♡</p>}
+              </div>
+              <div className="theme-card p-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <p className="font-bold theme-text flex-1 flex items-center gap-2"><KeyRound size={16} style={{color:'var(--color-accent)'}}/>Chat locker</p>
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full" style={{background: lockerHasCode ? 'var(--color-accent-alpha)' : 'var(--color-secondary)', color: lockerHasCode ? 'var(--color-accent)' : 'var(--color-text-muted)'}}>
+                    {lockerHasCode ? '🔒 Code set' : 'Off'}
+                  </span>
+                </div>
+                <p className="text-xs leading-relaxed" style={{color:'var(--color-text-muted)'}}>
+                  Optional and private. Set a code, then lock any chat from its ⋯ menu or a room from its Settings tab. Locked chats disappear from your lists, and their notifications never show previews. Nobody else can see or change your code — not even us: only a scrambled copy is stored, and a forgotten code can never be retrieved, only reset with your account password.
+                </p>
+                <div className="flex gap-2">
+                  <input type="text" placeholder={lockerHasCode ? 'New code (4–8 letters/digits)' : 'New code (4–8 letters/digits)'}
+                    value={lockerCode} onChange={e=>setLockerCodeInput(e.target.value.toUpperCase())}
+                    className="theme-input flex-1 py-2.5 px-3 text-sm font-mono tracking-widest uppercase" maxLength={8}/>
+                  <button onClick={()=>setLockerCodeInput(generateEntryCode())} className="px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-text)'}} title="Generate a random code">
+                    <Dices size={14}/>Random
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={saveLockerCode} disabled={lockerBusy || !lockerCode.trim()} className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white theme-btn" style={{opacity: lockerBusy || !lockerCode.trim() ? 0.6 : 1}}>
+                    {lockerHasCode ? 'Change Code' : 'Set Code'}
+                  </button>
+                  {lockerHasCode && (
+                    <button onClick={removeLocker} disabled={lockerBusy} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+                      Remove Code
+                    </button>
+                  )}
+                </div>
+                {lockerMsg && <p className="text-xs font-bold" style={{color:'var(--color-text-muted)'}}>{lockerMsg}</p>}
+                {lockerHasCode && !showForgot && (
+                  <button onClick={()=>setShowForgot(true)} className="text-xs font-bold underline" style={{color:'var(--color-text-muted)'}}>Forgot your code?</button>
+                )}
+                {showForgot && (
+                  <div className="space-y-2 pt-2" style={{borderTop:'1px solid var(--color-border)'}}>
+                    <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Type your account password to reset the locker. Your locked chats will become visible again, and you can set a new code after.</p>
+                    <input type="password" value={forgotPw} onChange={e=>setForgotPw(e.target.value)} placeholder="Account password" className="theme-input w-full py-2.5 px-3 text-sm"/>
+                    <button onClick={resetLockerWithPassword} disabled={forgotBusy || !forgotPw} className="theme-btn w-full py-2.5 text-sm" style={{opacity: forgotBusy || !forgotPw ? 0.6 : 1}}>{forgotBusy ? 'Checking…' : 'Reset locker'}</button>
+                  </div>
+                )}
               </div>
               <div className="theme-card p-6 space-y-4">
                 <p className="font-bold theme-text flex items-center gap-2"><Lock size={16} style={{color:'var(--color-accent)'}}/>Change Password</p>
