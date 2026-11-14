@@ -42,6 +42,8 @@ export default function GamesPage() {
     { id: 'rps', emoji: '✊', name: 'Rock Paper Scissors', desc: 'Choose your weapon and beat your friend!', players: '2 players' },
     { id: 'number-guess', emoji: '🔢', name: 'Number Guess', desc: 'Guess the secret number between 1 and 100!', players: 'Multiplayer' },
     { id: 'hangman', emoji: '🔡', name: 'Hangman', desc: 'Guess the hidden word letter by letter before it\'s too late!', players: 'Multiplayer' },
+    { id: 'draw-guess', emoji: '🎨', name: 'Draw & Guess', desc: 'Draw the word and let your friend guess it before time runs out!', players: '2 players' },
+    { id: 'trivia', emoji: '🧠', name: 'Trivia Duel', desc: 'Answer 5 questions fast — quicker correct answers score more!', players: '2 players' },
   ];
 
   if (loading) return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0, 1, 2].map(i => <div key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--color-accent)', animation: 'float 1s ease-in-out infinite', animationDelay: `${i * 0.2}s` }} />)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
