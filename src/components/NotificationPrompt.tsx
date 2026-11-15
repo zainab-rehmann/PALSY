@@ -1,15 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Bell, X } from 'lucide-react';
 
 // Friendly one-time ask for browser pop-up permission. Shown only to
 // signed-in users whose permission is still undecided, and never more
-// than once a week after dismissing it.
+// than once a week after dismissing it. Never shown inside a DM or a
+// room: the card sits at the bottom of the screen, where it would cover
+// the message composer and the room tab bar on phones. It still appears
+// on list pages (dashboard, Friends, Messages, Rooms, Games, Settings),
+// so every user still gets asked.
 const DISMISSED_KEY = 'palsy-notif-prompt-dismissed';
 
 export default function NotificationPrompt() {
+  const pathname = usePathname();
   const [show, setShow] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -50,7 +56,11 @@ export default function NotificationPrompt() {
     setAsking(false);
   }
 
-  if (!show) return null;
+  // Hide inside chats even if the ask timer already fired: navigating
+  // between a list page and a chat must never leave the card covering
+  // the composer.
+  const inChat = pathname?.startsWith('/messages/') || pathname?.startsWith('/rooms/');
+  if (!show || inChat) return null;
 
   return (
     <div className="fixed z-50 left-3 right-3 sm:left-auto sm:right-5 sm:w-[360px] rounded-3xl p-4"
