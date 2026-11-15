@@ -62,6 +62,14 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [myRole, setMyRole] = useState<'owner'|'moderator'|'member'>('member');
   const [tab, setTab] = useState<Tab>('chat');
+  // Honor ?tab=games (and friends) links, e.g. "Play games here" from the
+  // Games page. The Friends page already honors its ?tab= links; the room
+  // page ignored them and always opened on Chat. Read on mount only, so
+  // tapping tabs afterwards never fights the URL.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t === 'chat' || t === 'members' || t === 'games' || t === 'settings') setTab(t);
+  }, []);
   const [input, setInput] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1190,7 +1198,7 @@ export default function RoomPage() {
                   Optional extra lock, separate from the invite code below. When it is on, anyone who is not already a member must type this code before they can enter. Members always come straight in — setting or changing it never locks them out.
                 </p>
                 <div className="flex gap-2">
-                  <input type="text" placeholder={room.has_entry_code ? 'New code (4–8 letters/digits)' : 'New code (4–8 letters/digits)'}
+                  <input type="text" placeholder="New code (4–8 chars)"
                     value={codeInput} onChange={e=>setCodeInput(e.target.value.toUpperCase())}
                     className="theme-input flex-1 py-2.5 px-3 text-sm font-mono tracking-widest uppercase" maxLength={8}/>
                   <button onClick={()=>setCodeInput(generateEntryCode())} className="px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-text)'}} title="Generate a random code">
