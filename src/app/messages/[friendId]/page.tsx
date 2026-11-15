@@ -3,9 +3,9 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import type { Profile, Message } from '@/types';
+import type { Profile, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen, Gamepad2, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
@@ -15,6 +15,7 @@ import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSni
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LockerPrompt from '@/components/LockerPrompt';
+import { GAME_META, initialStateFor, restartStateFor, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes } from '@/components/GameComponents';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
@@ -63,6 +64,30 @@ export default function DMPage() {
   const [hasCode, setHasCode] = useState(false);
   const [lockerError, setLockerError] = useState('');
   const [lockerBusy, setLockerBusy] = useState(false);
+  // Games in DMs: sessions are scoped by dm_key (the two participants,
+  // sorted), completely separate from room games (room_id is null).
+  const [showGames, setShowGames] = useState(false);
+  const [dmLiveGame, setDmLiveGame] = useState<Game | null>(null);
+  const [dmAccent, setDmAccent] = useState('#FF6B9D');
+  const dmKey = profile ? `dm:${[profile.id, friendId].sort().join(':')}` : null;
+  useEffect(() => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim();
+    if (v) setDmAccent(v);
+  }, [profile?.theme]);
+  // Discover the DM's live game for the banner (polled; the panel itself
+  // subscribes live while open). Nothing loads behind the locker gate.
+  useEffect(() => {
+    if (!dmKey || gated) return;
+    const supabase = createClient();
+    let cancelled = false;
+    async function load() {
+      const { data } = await supabase.from('games').select('*').eq('dm_key', dmKey).neq('status', 'finished').order('created_at', { ascending: false }).limit(1);
+      if (!cancelled) setDmLiveGame(data && data[0] ? (data[0] as Game) : null);
+    }
+    void load();
+    const t = setInterval(load, 3000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [dmKey, gated]);
 
   async function submitLockerCode(code: string) {
     setLockerBusy(true); setLockerError('');
@@ -718,6 +743,10 @@ async function addReaction(msgId: string, emoji: string) {
             </div>
           </>
         )}
+        <button onClick={() => setShowGames(true)} className="relative p-2 rounded-xl flex-shrink-0" style={{ background: 'var(--color-secondary)' }} title="Play a game">
+          <Gamepad2 size={18} style={{ color: 'var(--color-accent)' }} />
+          {dmLiveGame && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#FF6B6B' }} />}
+        </button>
         <div className="relative">
           <button onClick={()=>setShowChatMenu(v=>!v)} className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}} title="Chat options"><MoreVertical size={18} style={{color:'var(--color-accent)'}}/></button>
           {showChatMenu && (
@@ -749,6 +778,21 @@ async function addReaction(msgId: string, emoji: string) {
         </button>
       )}
 
+      {dmLiveGame && !showGames && (
+        <button onClick={() => setShowGames(true)} className="mx-4 mt-3 p-3 rounded-2xl flex items-center gap-3 text-left flex-shrink-0" style={{ background: `${dmAccent}22`, border: `2px solid ${dmAccent}44` }}>
+          <span className="text-2xl">{GAME_META[dmLiveGame.type]?.emoji || '🎮'}</span>
+          <span className="flex-1 min-w-0">
+            <span className="block font-black text-sm theme-text">{GAME_META[dmLiveGame.type]?.name || 'A game'} is live in this chat!</span>
+            <span className="block text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>{dmLiveGame.created_by === profile?.id ? 'You started this game — jump back in.' : 'Your friend started this game — tap to play together.'}</span>
+          </span>
+          <span className="px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0" style={{ background: dmAccent }}>Play</span>
+        </button>
+      )}
+
+      {showGames && dmKey && profile ? (
+        <DMGamesPanel dmKey={dmKey} profile={profile} friendName={friend?.display_name || friend?.username || 'Friend'} accentColor={dmAccent} initialGameId={dmLiveGame?.id || null} onClose={() => setShowGames(false)} />
+      ) : (
+      <>
       {/* Messages */}
       {/* Messages — my own wallpaper, only I see it */}
       <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
@@ -994,6 +1038,8 @@ async function addReaction(msgId: string, emoji: string) {
           </button>
         </form>
       )}
+      </>
+      )}
       {confirmAction === 'clear' && (
         <ConfirmDialog
           title="Clear this chat?"
@@ -1038,6 +1084,216 @@ async function addReaction(msgId: string, emoji: string) {
         </>
       )}
       <style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style>
+    </div>
+  );
+}
+
+// Games inside a 1:1 DM. Same shared game components and sync pattern as
+// room games (realtime channel + 2s polling fallback + stateRef mirror),
+// but sessions are scoped by dm_key — the two DM participants, sorted —
+// with room_id null, so DM games can never cross-talk with room games.
+// The two participants ARE the players: there is no join ceremony. The
+// friend joins automatically the moment they open the panel; until then
+// the game waits (timed games never run without both players present).
+function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, onClose }: { dmKey: string; profile: Profile; friendName: string; accentColor: string; initialGameId: string | null; onClose: () => void }) {
+  const [gameType, setGameType] = useState<string | null>(null);
+  const [game, setGame] = useState<Game | null>(null);
+  const [gameState, setGameState] = useState<any>(null);
+  const [players, setPlayers] = useState<any[]>([]);
+  const [liveGame, setLiveGame] = useState<Game | null>(null);
+  const openGameIdRef = useRef<string | null>(null);
+  const autoJoinedRef = useRef<string | null>(null);
+
+  const bothIn = players.length >= 2;
+
+  async function refreshPlayers(gameId: string) {
+    const supabase = createClient();
+    const { data } = await supabase.from('game_players').select('*').eq('game_id', gameId);
+    setPlayers(data || []);
+  }
+
+  function openGame(g: Game) {
+    openGameIdRef.current = g.id;
+    setGame(g);
+    setGameState(g.state);
+    setGameType(g.type);
+    refreshPlayers(g.id);
+  }
+
+  function closeGame() {
+    openGameIdRef.current = null;
+    setGameType(null);
+    setGame(null);
+    setGameState(null);
+    setPlayers([]);
+  }
+
+  // Discover the DM's live game, and keep an open game in sync on both
+  // players' screens (moves arrive via realtime; polling covers drops).
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('games').select('*').eq('dm_key', dmKey).neq('status', 'finished').order('created_at', { ascending: false }).limit(1);
+      if (!cancelled && data && data[0]) setLiveGame(data[0] as Game);
+    })();
+    const channel = supabase.channel(`games-dm-${dmKey}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'games', filter: `dm_key=eq.${dmKey}` }, (payload) => {
+        const g = payload.new as Game;
+        if (!g || !g.id) return;
+        if (openGameIdRef.current === g.id) {
+          setGame(g);
+          setGameState(g.state);
+          refreshPlayers(g.id);
+        }
+        if (g.status === 'finished') {
+          setLiveGame(live => (live && live.id === g.id ? null : live));
+        } else {
+          setLiveGame(g);
+        }
+      })
+      .subscribe();
+    const poll = setInterval(async () => {
+      if (cancelled) return;
+      const { data } = await supabase.from('games').select('*').eq('dm_key', dmKey).neq('status', 'finished').order('created_at', { ascending: false }).limit(1);
+      if (cancelled) return;
+      if (data && data[0]) setLiveGame(data[0] as Game);
+      else setLiveGame(null);
+      const openId = openGameIdRef.current;
+      if (openId) {
+        const { data: og } = await supabase.from('games').select('*').eq('id', openId).single();
+        if (!cancelled && og) {
+          setGame(og as Game);
+          setGameState((og as Game).state);
+          refreshPlayers(openId);
+        }
+      }
+    }, 2000);
+    return () => { cancelled = true; clearInterval(poll); supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dmKey]);
+
+  async function joinGame(g: Game) {
+    const supabase = createClient();
+    await supabase.from('game_players').upsert({ game_id: g.id, user_id: profile.id }, { onConflict: 'game_id,user_id' });
+    const { data: plist } = await supabase.from('game_players').select('*').eq('game_id', g.id);
+    const count = (plist || []).length;
+    const st: any = { ...(g.state as any) };
+    if (g.type === 'tictactoe' && !st.playerO && st.playerX !== profile.id) {
+      st.playerO = profile.id;
+    }
+    // Touch the game row so every open screen refreshes its player list
+    // and the waiting banner lifts the moment the second player is in.
+    const { data } = await supabase.from('games').update({ state: st, status: count >= 2 ? 'active' : 'waiting' }).eq('id', g.id).select().single();
+    openGame((data as Game) || g);
+    if (plist) setPlayers(plist);
+  }
+
+  // Auto-join: opening the panel on a live game joins it — no Join tap,
+  // no invite. Runs once per game id.
+  useEffect(() => {
+    if (!initialGameId || autoJoinedRef.current === initialGameId) return;
+    autoJoinedRef.current = initialGameId;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.from('games').select('*').eq('id', initialGameId).single();
+      if (!data || (data as Game).status === 'finished') return;
+      const g = data as Game;
+      const { data: plist } = await supabase.from('game_players').select('*').eq('game_id', g.id);
+      const alreadyIn = (plist || []).some((p: any) => p.user_id === profile.id);
+      if (alreadyIn) openGame(g);
+      else await joinGame(g);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialGameId]);
+
+  async function startGame(type: string) {
+    const supabase = createClient();
+    const initialState = initialStateFor(type, profile.id);
+    const { data: g } = await supabase.from('games').insert({ room_id: null, dm_key: dmKey, type, status: 'waiting', state: initialState, created_by: profile.id }).select().single();
+    if (g) {
+      await supabase.from('game_players').upsert({ game_id: g.id, user_id: profile.id }, { onConflict: 'game_id,user_id' });
+      setLiveGame(g as Game);
+      openGame(g as Game);
+    }
+  }
+
+  async function restartGame() {
+    if (!game || !gameState) return;
+    const supabase = createClient();
+    const fresh = restartStateFor(game, gameState);
+    const { data } = await supabase.from('games').update({ state: fresh, status: 'active', winner_id: null }).eq('id', game.id).select().single();
+    if (data) {
+      setGame(data as Game);
+      setGameState((data as Game).state);
+    } else {
+      setGameState(fresh);
+    }
+  }
+
+  if (!gameType) return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex items-center gap-2 mb-4">
+        <button onClick={onClose} className="p-2 rounded-xl" style={{ background: 'rgba(var(--color-overlay-rgb),0.7)' }}>
+          <ArrowLeft size={16} style={{ color: accentColor }} />
+        </button>
+        <span className="font-black theme-text">Games with {friendName} 🎮</span>
+      </div>
+      {liveGame && (
+        <div className="mb-4 p-4 rounded-2xl flex items-center gap-3" style={{ background: `${accentColor}22`, border: `2px solid ${accentColor}44` }}>
+          <span className="text-3xl">{GAME_META[liveGame.type]?.emoji || '🎮'}</span>
+          <div className="flex-1">
+            <p className="font-black text-sm theme-text">{GAME_META[liveGame.type]?.name || 'A game'} is live in this chat!</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{liveGame.created_by === profile.id ? 'You started this game — jump back in.' : 'Your friend started this game — open it and play together, live.'}</p>
+          </div>
+          <button onClick={() => { if (liveGame.created_by !== profile.id) joinGame(liveGame); else openGame(liveGame); }}
+            className="px-4 py-2 rounded-full text-xs font-bold text-white flex-shrink-0" style={{ background: accentColor }}>
+            Open
+          </button>
+        </div>
+      )}
+      <p className="text-sm font-bold mb-4 theme-text">Just the two of you — your friend joins automatically when they open the game. No invite needed!</p>
+      <div className="grid grid-cols-2 gap-3">
+        {Object.entries(GAME_META).map(([type, meta]) => (
+          <button key={type} onClick={() => startGame(type)}
+            className="p-5 rounded-2xl flex flex-col items-center gap-2 transition-all hover:scale-[1.03]"
+            style={{ background: 'rgba(var(--color-overlay-rgb),0.8)', border: `2px solid ${accentColor}33` }}>
+            <span className="text-3xl">{meta.emoji}</span>
+            <span className="font-black text-sm theme-text">{meta.name}</span>
+            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{meta.desc}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex items-center gap-2 mb-4">
+        <button onClick={closeGame} className="p-2 rounded-xl" style={{ background: 'rgba(var(--color-overlay-rgb),0.7)' }}>
+          <ArrowLeft size={16} style={{ color: accentColor }} />
+        </button>
+        <span className="font-black theme-text">{gameType === 'tictactoe' ? 'Tic Tac Toe' : gameType === 'rps' ? 'Rock Paper Scissors' : gameType === 'number-guess' ? 'Number Guess' : gameType === 'draw-guess' ? 'Draw & Guess' : gameType === 'trivia' ? 'Trivia Duel' : gameType === 'dots-boxes' ? 'Dots & Boxes' : 'Hangman'}</span>
+        <span className="text-xs ml-auto" style={{ color: 'var(--color-text-muted)' }}>{players.length} player{players.length === 1 ? '' : 's'} in</span>
+        <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
+          style={{ background: accentColor, opacity: bothIn ? 1 : 0.45 }}>
+          <RotateCcw size={13} /> Restart
+        </button>
+      </div>
+      {!bothIn && (
+        <div className="mb-3 p-3 rounded-2xl text-center text-sm font-bold theme-text" style={{ background: `${accentColor}22` }}>
+          Waiting for {friendName} to open this game… 💌
+          <span className="block text-xs font-semibold mt-1" style={{ color: 'var(--color-text-muted)' }}>The game starts when they open it — no invite needed.</span>
+        </div>
+      )}
+      {gameType === 'tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'hangman' && game && <Hangman game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'draw-guess' && game && <DrawGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
     </div>
   );
 }
