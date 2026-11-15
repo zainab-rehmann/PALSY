@@ -125,7 +125,8 @@ export type GameStatus = 'waiting' | 'active' | 'finished';
 
 export interface Game {
   id: string;
-  room_id: string;
+  room_id: string | null;
+  dm_key: string | null;
   type: GameType;
   status: GameStatus;
   state: Record<string, unknown>;
