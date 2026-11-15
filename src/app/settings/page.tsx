@@ -428,7 +428,7 @@ export default function SettingsPage() {
                   Optional and private. Set a code, then lock any chat from its ⋯ menu or a room from its Settings tab. Locked chats disappear from your lists, and their notifications never show previews. Nobody else can see or change your code — not even us: only a scrambled copy is stored, and a forgotten code can never be retrieved, only reset with your account password.
                 </p>
                 <div className="flex gap-2">
-                  <input type="text" placeholder={lockerHasCode ? 'New code (4–8 letters/digits)' : 'New code (4–8 letters/digits)'}
+                  <input type="text" placeholder="New code (4–8 chars)"
                     value={lockerCode} onChange={e=>setLockerCodeInput(e.target.value.toUpperCase())}
                     className="theme-input flex-1 py-2.5 px-3 text-sm font-mono tracking-widest uppercase" maxLength={8}/>
                   <button onClick={()=>setLockerCodeInput(generateEntryCode())} className="px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-text)'}} title="Generate a random code">
