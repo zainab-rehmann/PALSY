@@ -1,13 +1,24 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import MessageNotifier from "@/components/MessageNotifier";
 import NotificationPrompt from "@/components/NotificationPrompt";
 import PresenceManager from "@/components/PresenceManager";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
   title: "PALSY ♡ — Your Little Corner of Friendship",
   description: "A cute, cozy and private digital hangout for friends.",
-  icons: { icon: "/favicon.svg" },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "PALSY",
+  },
+  icons: { icon: "/favicon.svg", apple: "/apple-touch-icon.png" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#FF6B9D",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -23,6 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <MessageNotifier />
         <NotificationPrompt />
         <PresenceManager />
+        <ServiceWorkerRegister />
       </body>
     </html>
   );
