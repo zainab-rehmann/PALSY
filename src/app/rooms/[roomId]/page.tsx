@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
+import { useEffect, useState, useRef, useCallback, useLayoutEffect, Fragment } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room, RoomMember, Message, MessageReceipt, Game } from '@/types';
@@ -93,7 +93,23 @@ export default function RoomPage() {
   const [copied, setCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const lastMsgIdRef = useRef<string | null>(null);
+  // Chat scroll: the list must open at the NEWEST messages (bottom), on
+  // first open, after reload, and whenever the list remounts (room tab
+  // switch, DM games panel close). The old effect scrolled only when the
+  // newest id changed via scrollIntoView — in rooms it fired while the
+  // loading spinner was still up (the receipts fetch sits between
+  // setMessages and setLoading(false)), consumed its guard, and the list
+  // then mounted at the top. New rule: an explicit pending-bottom flag,
+  // consumed by a layout effect once the list is actually mounted, plus
+  // near-bottom tracking so incoming messages never yank a reader who
+  // scrolled up to older history.
+  const nearBottomRef = useRef(true);
+  const pendingBottomRef = useRef(true);
+  const lastSeenNewestRef = useRef<string | null>(null);
+  function handleListScroll() {
+    const el = listRef.current;
+    if (el) nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -329,15 +345,34 @@ export default function RoomPage() {
     document.addEventListener('visibilitychange', stampVisible);
     return () => document.removeEventListener('visibilitychange', stampVisible);
   }, [tab, profile, messages, roomId]);
-  // Scroll to bottom only when the newest message changes — never when
-  // older history is prepended.
+  // A different room (or a locker unlock) always opens at the bottom.
   useEffect(() => {
+    pendingBottomRef.current = true;
+    nearBottomRef.current = true;
+    lastSeenNewestRef.current = null;
+  }, [roomId, gateTick]);
+
+  // Scroll manager (layout effect: runs after the list is mounted, so the
+  // load-then-receipts-then-loading=false sequence can no longer consume
+  // the scroll while the spinner is up).
+  useLayoutEffect(() => {
+    if (loading || gated) return;
+    const el = listRef.current;
+    if (!el || messages.length === 0) return;
     const last = messages[messages.length - 1];
-    if (last && last.id !== lastMsgIdRef.current) {
-      lastMsgIdRef.current = last.id;
-      bottomRef.current?.scrollIntoView({behavior:'smooth'});
+    if (pendingBottomRef.current) {
+      pendingBottomRef.current = false;
+      lastSeenNewestRef.current = last.id;
+      el.scrollTop = el.scrollHeight;
+      return;
     }
-  }, [messages]);
+    if (last.id !== lastSeenNewestRef.current) {
+      lastSeenNewestRef.current = last.id;
+      // New arrival: follow only when the reader is already at/near the
+      // bottom — never yank someone reading older messages.
+      if (nearBottomRef.current) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages, loading, gated, tab]);
 
   // Members presence refresh: realtime can lag or drop, so re-read
   // members' status every 15s. The re-render is also what flips Online
@@ -427,6 +462,7 @@ export default function RoomPage() {
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       sender: profile, reactions: [],
     };
+    nearBottomRef.current = true; // my own send always lands at the bottom
     setMessages(m=>[...m, temp]);
     setInput('');
     setReplyTo(null);
@@ -937,7 +973,7 @@ export default function RoomPage() {
       {/* Tab bar */}
       <div className="flex px-4 pt-3 gap-1 flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
         {(['chat','members','games','settings'] as Tab[]).map(t=>(
-          <button key={t} onClick={()=>setTab(t)}
+          <button key={t} onClick={()=>{ if (t==='chat') pendingBottomRef.current = true; setTab(t); }}
             className="px-4 py-2 rounded-t-xl text-xs font-bold capitalize transition-all"
             style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?accentColor:'var(--color-text-muted)',borderBottom:tab===t?`2px solid ${accentColor}`:undefined}}>
             {t==='chat'?'💬 Chat':t==='members'?`👥 (${members.length})`:t==='games'?'🎮 Games':'⚙️ Settings'}
@@ -960,7 +996,7 @@ export default function RoomPage() {
               </button>
             )}
             {/* Messages — my own wallpaper, only I see it */}
-            <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
+            <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
               {hasMore && messages.length > 0 && (
                 <div className="flex justify-center pb-1">
                   <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'rgba(var(--color-overlay-rgb),0.9)',color:accentColor,border:`1px solid ${accentColor}33`}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
