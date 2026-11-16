@@ -135,6 +135,38 @@ function drawStrokeOn(ctx: CanvasRenderingContext2D, s: any) {
   ctx.stroke();
 }
 
+// Crazy Eights helpers: cards are 'AS', '10H', '8D' — rank + suit letter.
+// Suits: S spades, H hearts, D diamonds, C clubs.
+const CE_RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const CE_SUITS = ['S','H','D','C'] as const;
+const CE_SUIT_SYMBOL: Record<string,string> = { S:'♠', H:'♥', D:'♦', C:'♣' };
+const CE_SUIT_NAME: Record<string,string> = { S:'Spades', H:'Hearts', D:'Diamonds', C:'Clubs' };
+function ceRank(card: string): string { return card.slice(0, -1); }
+function ceSuit(card: string): string { return card.slice(-1); }
+function ceIsRed(card: string): boolean { const s = ceSuit(card); return s === 'H' || s === 'D'; }
+function ceNewDeck(): string[] {
+  const d: string[] = [];
+  for (const s of CE_SUITS) for (const r of CE_RANKS) d.push(r + s);
+  return shuffled(d);
+}
+function cePlayable(card: string, top: string, currentSuit: string): boolean {
+  if (!top) return true;
+  return ceRank(card) === '8' || ceRank(card) === ceRank(top) || ceSuit(card) === currentSuit;
+}
+
+// Deal 7 cards to a player who has no hand yet (the second player
+// joining, or a rematch). Never deals a third hand — the game is
+// strictly two players.
+export function dealCrazyEights(st: any, userId: string): any {
+  const hands: Record<string, string[]> = { ...(st.hands || {}) };
+  if (hands[userId]) return st;
+  if (Object.keys(hands).length >= 2) return st;
+  const deck: string[] = [...(st.deck || [])];
+  if (deck.length < 7) return st;
+  hands[userId] = deck.splice(0, 7);
+  return { ...st, hands, deck };
+}
+
 export function initialStateFor(type: string, creatorId: string): any {
   if (type === 'tictactoe') return { board: Array(9).fill(null), currentPlayer: creatorId, playerX: creatorId, playerO: null, winner: null };
   if (type === 'rps') return { choices: {}, winner: null, round: 1 };
@@ -143,6 +175,14 @@ export function initialStateFor(type: string, creatorId: string): any {
   if (type === 'draw-guess') return { phase: 'playing', round: 1, totalRounds: 4, drawerId: creatorId, words: shuffled(DRAW_WORDS).slice(0, 4), scores: {}, guesses: [], strokes: [], roundEndsAt: null, roundResult: null, winner: null };
   if (type === 'trivia') return { phase: 'playing', qi: 0, questions: shuffled(TRIVIA_BANK).slice(0, 5), answers: {}, scores: {}, lastPoints: {}, questionEndsAt: null, winner: null };
   if (type === 'dots-boxes') return { phase: 'playing', turn: creatorId, edges: {}, boxes: {}, scores: {}, lastMoveBy: null, lastClaimed: 0, winner: null };
+  if (type === 'crazy-eights') {
+    const deck = ceNewDeck();
+    const hands: Record<string, string[]> = { [creatorId]: deck.splice(0, 7) };
+    // The first discard must not be an 8: cycle 8s to the bottom.
+    let top = deck.shift()!;
+    while (ceRank(top) === '8') { deck.push(top); top = deck.shift()!; }
+    return { phase: 'playing', deck, hands, discard: [top], currentSuit: ceSuit(top), turn: creatorId, winner: null };
+  }
   return {};
 }
 
@@ -155,6 +195,7 @@ export const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = 
   'draw-guess': { emoji:'🎨', name:'Draw & Guess', desc:'2 players' },
   'trivia': { emoji:'🧠', name:'Trivia Duel', desc:'2 players' },
   'dots-boxes': { emoji:'🔲', name:'Dots & Boxes', desc:'2 players' },
+  'crazy-eights': { emoji:'🃏', name:'Crazy Eights', desc:'2 players' },
 };
 
 export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
@@ -190,7 +231,7 @@ export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate
           <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>Tap Restart above to play again together.</p>
         </div>
       ) : !canPlay ? (
-        <p className="text-sm font-bold text-center theme-text">Waiting for the second player to join…</p>
+        <p className="font-bold text-center theme-text">Waiting for the second player to join…</p>
       ) : (
         <p className="text-sm font-bold text-center theme-text">{myTurn?'Your turn! ✨':'Waiting for other player...'}</p>
       )}
@@ -1226,6 +1267,208 @@ export function DotsBoxes({ game, state, profile, accentColor, canPlay, players,
 }
 
 
+export function CrazyEights({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const [suitFor, setSuitFor] = useState<string | null>(null);
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const phase = state.phase || 'playing';
+  const finished = phase === 'finished';
+  const hands: Record<string, string[]> = state.hands || {};
+  const myHand: string[] = hands[profile?.id] || [];
+  const theirHand: string[] = otherId ? (hands[otherId] || []) : [];
+  const discard: string[] = state.discard || [];
+  const top = discard[discard.length - 1] || null;
+  const deck: string[] = state.deck || [];
+  const myTurn = state.turn === profile?.id;
+  const currentSuit: string = state.currentSuit || (top ? ceSuit(top) : 'S');
+
+  async function saveState(newState: any, done: boolean) {
+    const supabase = createClient();
+    await supabase.from('games').update({ state: newState, status: done ? 'finished' : 'active', winner_id: done && newState.winner && newState.winner !== 'draw' ? newState.winner : null }).eq('id', game.id);
+    onUpdate(newState);
+  }
+
+  // The other player, from the player list or from the hands in state.
+  function otherPlayerId(cur: any): string {
+    if (otherId) return otherId;
+    return Object.keys(cur.hands || {}).find((id: string) => id !== profile.id) || profile.id;
+  }
+
+  function playable(card: string): boolean {
+    return !!top && cePlayable(card, top, currentSuit);
+  }
+
+  async function commitPlay(card: string, suit: string) {
+    const cur = stateRef.current;
+    if (cur.phase !== 'playing' || !canPlay) return;
+    if (cur.turn !== profile.id) return;
+    const curHands: Record<string, string[]> = { ...(cur.hands || {}) };
+    const hand = [...(curHands[profile.id] || [])];
+    const idx = hand.indexOf(card);
+    if (idx < 0) return;
+    const curDiscard: string[] = [...(cur.discard || [])];
+    const curTop = curDiscard[curDiscard.length - 1];
+    if (!cePlayable(card, curTop, cur.currentSuit)) return;
+    hand.splice(idx, 1);
+    curHands[profile.id] = hand;
+    curDiscard.push(card);
+    const next: any = { ...cur, hands: curHands, discard: curDiscard, currentSuit: suit };
+    if (hand.length === 0) {
+      next.phase = 'finished';
+      next.winner = profile.id;
+      await saveState(next, true);
+    } else {
+      next.turn = otherPlayerId(cur);
+      await saveState(next, false);
+    }
+  }
+
+  async function playCard(card: string) {
+    if (!canPlay || !myTurn || finished) return;
+    if (!playable(card)) return;
+    // 8s are wild: pick the next suit first, then commit the move.
+    if (ceRank(card) === '8') { setSuitFor(card); return; }
+    await commitPlay(card, ceSuit(card));
+  }
+
+  async function pickSuit(suit: string) {
+    const card = suitFor;
+    setSuitFor(null);
+    if (!card) return;
+    await commitPlay(card, suit);
+  }
+
+  async function drawCard() {
+    const cur = stateRef.current;
+    if (cur.phase !== 'playing' || !canPlay) return;
+    if (cur.turn !== profile.id) return;
+    let deckNow: string[] = [...(cur.deck || [])];
+    let discardNow: string[] = [...(cur.discard || [])];
+    if (deckNow.length === 0) {
+      // Reshuffle everything but the top discard back into the deck.
+      const topCard = discardNow[discardNow.length - 1];
+      deckNow = shuffled(discardNow.slice(0, -1));
+      discardNow = [topCard];
+      if (deckNow.length === 0) return;
+    }
+    const drawn = deckNow.shift()!;
+    const curHands: Record<string, string[]> = { ...(cur.hands || {}) };
+    curHands[profile.id] = [...(curHands[profile.id] || []), drawn];
+    const next: any = { ...cur, deck: deckNow, discard: discardNow, hands: curHands };
+    // If the drawn card can be played, the turn stays with you so you
+    // can play it right away; otherwise the turn passes to your friend.
+    const curTop = discardNow[discardNow.length - 1];
+    next.turn = cePlayable(drawn, curTop, cur.currentSuit) ? profile.id : otherPlayerId(cur);
+    await saveState(next, false);
+  }
+
+  function cardFace(card: string, opts?: { dimmed?: boolean; onClick?: () => void; disabled?: boolean }) {
+    const red = ceIsRed(card);
+    const color = red ? '#DC2626' : '#1F2937';
+    return (
+      <button key={card} onClick={opts?.onClick} disabled={opts?.disabled}
+        className="w-12 h-[68px] rounded-xl flex flex-col items-center justify-center transition-all hover:scale-105 shrink-0"
+        style={{ background: '#FFFFFF', border: `2px solid ${opts?.dimmed ? '#E5E7EB' : accentColor}`, color, opacity: opts?.dimmed ? 0.45 : 1 }}>
+        <span className="text-sm font-black leading-none">{ceRank(card)}</span>
+        <span className="text-xl leading-none mt-0.5">{CE_SUIT_SYMBOL[ceSuit(card)]}</span>
+      </button>
+    );
+  }
+
+  const winnerText = !finished ? '' : state.winner === profile?.id ? 'You win! 🎉' : "Your friend wins!";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="px-3 py-1.5 rounded-full font-black" style={{ background: `${accentColor}22`, color: accentColor }}>You · {myHand.length} cards</span>
+        <span className="px-3 py-1.5 rounded-full font-black" style={{ background: 'var(--color-secondary)', color: 'var(--color-text-muted)' }}>Friend · {theirHand.length} cards</span>
+        <span className="ml-auto text-xs font-bold" style={{ color: 'var(--color-text-muted)' }}>{deck.length} in deck</span>
+      </div>
+
+      {!finished && (
+        <p className="text-center font-black theme-text">
+          {canPlay ? (myTurn ? 'Your turn — play a matching card ♡' : "Friend's turn…") : 'Waiting for your friend to join…'}
+        </p>
+      )}
+
+      {/* Table: discard pile + deck */}
+      <div className="rounded-3xl p-4 flex items-center justify-center gap-6" style={{ background: 'rgba(var(--color-overlay-rgb),0.8)' }}>
+        <div className="text-center">
+          {top ? cardFace(top, { disabled: true }) : <div className="w-12 h-[68px] rounded-xl" style={{ background: 'var(--color-secondary)' }} />}
+          <p className="text-[11px] font-bold mt-1.5" style={{ color: 'var(--color-text-muted)' }}>Top card</p>
+        </div>
+        <div className="text-center">
+          <p className="text-sm font-black theme-text">Suit in play</p>
+          <p className="text-2xl mt-0.5" style={{ color: (currentSuit === 'H' || currentSuit === 'D') ? '#DC2626' : '#1F2937' }}>{CE_SUIT_SYMBOL[currentSuit]} {CE_SUIT_NAME[currentSuit]}</p>
+          <p className="text-[11px] font-bold mt-0.5" style={{ color: 'var(--color-text-muted)' }}>Match the suit or the rank — or play an 8</p>
+        </div>
+        <div className="text-center">
+          <button onClick={drawCard} disabled={!canPlay || !myTurn || finished}
+            className="w-12 h-[68px] rounded-xl flex flex-col items-center justify-center transition-all hover:scale-105"
+            style={{ background: accentColor, color: '#FFFFFF', opacity: (!canPlay || !myTurn || finished) ? 0.45 : 1 }}>
+            <span className="text-lg font-black leading-none">🂠</span>
+            <span className="text-[10px] font-black mt-0.5">DRAW</span>
+          </button>
+          <p className="text-[11px] font-bold mt-1.5" style={{ color: 'var(--color-text-muted)' }}>Draw a card</p>
+        </div>
+      </div>
+
+      {/* Friend's hand: face-down backs, count only — their cards stay secret. */}
+      <div>
+        <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-muted)' }}>Friend&apos;s hand ({theirHand.length})</p>
+        <div className="flex gap-1.5 flex-wrap min-h-[68px] items-center">
+          {theirHand.length === 0 && <p className="text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>No cards yet — they join when the game starts.</p>}
+          {theirHand.slice(0, 7).map((_: string, i: number) => (
+            <div key={i} className="w-12 h-[68px] rounded-xl flex items-center justify-center text-lg" style={{ background: accentColor, color: '#FFFFFF', opacity: 0.55 }}>🂠</div>
+          ))}
+          {theirHand.length > 7 && <span className="text-xs font-bold" style={{ color: 'var(--color-text-muted)' }}>+{theirHand.length - 7} more</span>}
+        </div>
+      </div>
+
+      {/* Suit picker for a wild 8 */}
+      {suitFor && (
+        <div className="rounded-2xl p-4 text-center space-y-2" style={{ background: `${accentColor}22` }}>
+          <p className="font-black text-sm theme-text">You played an 8 — it&apos;s wild! Pick the next suit:</p>
+          <div className="flex justify-center gap-2">
+            {(['S','H','D','C'] as const).map(s => (
+              <button key={s} onClick={() => pickSuit(s)}
+                className="px-4 py-2.5 rounded-xl font-black text-lg transition-all hover:scale-105"
+                style={{ background: '#FFFFFF', border: `2px solid ${accentColor}`, color: s === 'H' || s === 'D' ? '#DC2626' : '#1F2937' }}>
+                {CE_SUIT_SYMBOL[s]} {CE_SUIT_NAME[s]}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setSuitFor(null)} className="text-xs font-bold" style={{ color: 'var(--color-text-muted)' }}>Cancel</button>
+        </div>
+      )}
+
+      {/* My hand */}
+      <div>
+        <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-muted)' }}>Your hand ({myHand.length}) — tap a glowing card to play it</p>
+        <div className="flex gap-1.5 flex-wrap">
+          {myHand.length === 0 && <p className="text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>Your hand is empty — the game will deal you in when your friend joins.</p>}
+          {myHand.map((card: string) => cardFace(card, { dimmed: !playable(card) || !myTurn, disabled: !canPlay || !myTurn || finished || !playable(card), onClick: () => playCard(card) }))}
+        </div>
+      </div>
+
+      {finished && (
+        <div className="text-center space-y-2">
+          <p className="text-xl font-black theme-text">{winnerText}</p>
+          <p className="text-sm font-bold" style={{ color: 'var(--color-text-muted)' }}>Final cards — You: {myHand.length} · Friend: {theirHand.length}</p>
+          <p className="text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>Tap Restart above for a rematch ♡</p>
+        </div>
+      )}
+      {!finished && (
+        <p className="text-xs text-center font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+          8s are wild — play one, then pick the next suit. Can&apos;t play? Draw a card: if it matches, you can play it right away, otherwise your turn passes. First to empty your hand wins!
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 // Fresh state for a rematch: same rules as the room restart — Tic Tac
 // Toe keeps its X/O seats, Rock Paper Scissors bumps the round, every
 // other game restarts from its initial state.
@@ -1237,5 +1480,14 @@ export function restartStateFor(game: any, gameState: any): any {
     fresh.currentPlayer = fresh.playerX;
   }
   if (game.type === 'rps' && gameState) fresh.round = (gameState.round || 1) + 1;
+  if (game.type === 'crazy-eights' && gameState) {
+    // Re-deal the second player from the fresh deck, as the room restart does.
+    const prevHands = (gameState.hands || {}) as Record<string, string[]>;
+    let next = fresh;
+    for (const pid of Object.keys(prevHands)) {
+      if (pid !== game.created_by) next = dealCrazyEights(next, pid);
+    }
+    return next;
+  }
   return fresh;
 }
