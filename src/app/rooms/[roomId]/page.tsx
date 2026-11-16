@@ -676,17 +676,21 @@ export default function RoomPage() {
     const { error: upErr } = await supabase.storage.from('media').upload(path, file, { upsert: true });
     if (upErr) { alert('Upload failed. Please try again.'); return; }
     const { data: pub } = supabase.storage.from('media').getPublicUrl(path);
-    const { error } = await supabase.from('rooms').update({ avatar_url: pub.publicUrl }).eq('id', roomId);
-    if (error) { alert('Only the room owner can change the room picture.'); return; }
+    // Any member may change the room picture: the RPC checks membership
+    // and updates only the picture (entry codes / members stay owner-only).
+    const { data: ok, error } = await supabase.rpc('update_room_appearance', { p_room_id: roomId, p_preset: null, p_accent_color: null, p_avatar_url: pub.publicUrl });
+    if (error || !ok) { alert('Could not save the room picture. Please try again.'); return; }
     setRoom({ ...room, avatar_url: pub.publicUrl });
   }
 
   async function setRoomTheme(key: string) {
-    if (!room || myRole!=='owner') return;
+    if (!room) return;
     const p = PRESETS[key];
     const supabase = createClient();
-    const { error } = await supabase.from('rooms').update({ preset: key, accent_color: p.accent }).eq('id', roomId);
-    if (error) { alert('Only the room owner can change the theme.'); return; }
+    // Any member may change the room theme: the RPC checks membership
+    // and updates only the theme (entry codes / members stay owner-only).
+    const { data: ok, error } = await supabase.rpc('update_room_appearance', { p_room_id: roomId, p_preset: key, p_accent_color: p.accent, p_avatar_url: null });
+    if (error || !ok) { alert('Could not save the theme. Please try again.'); return; }
     setRoom({ ...room, preset: key, accent_color: p.accent });
   }
 
@@ -1152,13 +1156,11 @@ export default function RoomPage() {
                   : <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl" style={{background:`${accentColor}22`}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
                 <div className="flex-1">
                   <p className="text-sm font-bold theme-text">{room.name}</p>
-                  <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{myRole==='owner' ? 'This is the picture everyone sees for this room.' : 'Only the room owner can change the picture.'}</p>
+                  <p className="text-xs" style={{color:'var(--color-text-muted)'}}>This is the picture everyone sees for this room. Anyone in the room can change it ♡</p>
                 </div>
-                {myRole==='owner' && (
-                  <button onClick={()=>roomPicRef.current?.click()} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white flex-shrink-0" style={{background:accentColor}}>
-                    <Camera size={14}/> Change
-                  </button>
-                )}
+                <button onClick={()=>roomPicRef.current?.click()} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white flex-shrink-0" style={{background:accentColor}}>
+                  <Camera size={14}/> Change
+                </button>
               </div>
               <input ref={roomPicRef} type="file" accept="image/*" className="hidden" onChange={uploadRoomPic}/>
             </div>
@@ -1166,15 +1168,15 @@ export default function RoomPage() {
               <h3 className="font-black theme-text">Room Theme</h3>
               <div className="grid grid-cols-3 gap-2">
                 {Object.entries(PRESETS).map(([key,p])=>(
-                  <button key={key} onClick={()=>setRoomTheme(key)} disabled={myRole!=='owner'}
+                  <button key={key} onClick={()=>setRoomTheme(key)}
                     className="p-3 rounded-2xl text-center transition-all hover:scale-[1.03]"
-                    style={{background:p.bg, border: room.preset===key ? `2px solid ${p.accent}` : '2px solid transparent', opacity: myRole==='owner'?1:0.7}}>
+                    style={{background:p.bg, border: room.preset===key ? `2px solid ${p.accent}` : '2px solid transparent'}}>
                     <div className="text-2xl mb-1">{p.emoji}</div>
                     <div className="text-[11px] font-bold capitalize" style={{color:'var(--color-text)'}}>{key.replace('-',' ')}</div>
                   </button>
                 ))}
               </div>
-              {myRole!=='owner' && <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Only the room owner can change the theme.</p>}
+              <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Anyone in this room can change the theme — it updates for everyone ♡</p>
             </div>
             <div className="rounded-2xl p-4" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
               <div className="flex items-center gap-3">
