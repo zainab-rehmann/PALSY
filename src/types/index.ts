@@ -120,7 +120,7 @@ export interface Notification {
   created_at: string;
 }
 
-export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes';
+export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights';
 export type GameStatus = 'waiting' | 'active' | 'finished';
 
 export interface Game {
