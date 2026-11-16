@@ -23,8 +23,6 @@ function FriendsContent() {
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [searchError, setSearchError] = useState('');
-  const [suggestions, setSuggestions] = useState<Profile[]>([]);
-  const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
   const [pendingIds, setPendingIds] = useState<string[]>([]);
   const profileRef = useRef<Profile|null>(null);
   profileRef.current = profile;
@@ -60,7 +58,6 @@ function FriendsContent() {
         // Refresh presence AND profile fields (privacy flips must show live).
         const patchOne = (f: Profile) => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen, is_private: upd.is_private, bio: upd.bio, display_name: upd.display_name, username: upd.username, avatar_url: upd.avatar_url } : f;
         setFriends(prev => prev.map(patchOne));
-        setSuggestions(prev => prev.map(patchOne));
         setSearchResults(prev => prev.map(patchOne));
       })
       .subscribe();
@@ -81,22 +78,14 @@ function FriendsContent() {
         return u ? { ...f, is_online: u.is_online, last_seen: u.last_seen, is_private: u.is_private, bio: u.bio, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url } : f;
       });
       setFriends(patch);
-      setSuggestions(patch);
       setSearchResults(patch);
     }, 15000);
     return () => clearInterval(t);
   }, []);
 
-  // People on PALSY: shown when the Find tab opens, so it is never blank.
-  const loadSuggestions = useCallback(async () => {
-    if (suggestionsLoaded || !profileRef.current) return;
-    setSuggestionsLoaded(true);
-    const supabase = createClient();
-    const { data } = await supabase.from('profiles').select('*').neq('id', profileRef.current.id).order('username', { ascending: true }).limit(20);
-    setSuggestions(data||[]);
-  }, [suggestionsLoaded]);
-
-  useEffect(() => { if (tab==='search') loadSuggestions(); }, [tab, loadSuggestions]);
+  // Find shows NO names by default: names appear only once the user
+  // searches. No browse list is fetched on open at all — the search
+  // below is the only way names reach this tab.
 
   // PostgREST logic-tree characters ( , ( ) ) break the search filter and
   // used to fail silently, showing nothing. Strip those — but LIKE wildcards
@@ -280,14 +269,8 @@ function FriendsContent() {
               {searched && searchResults.length===0 && !searching && !searchError && (
                 <EmptyState icon="🔍" title="No users found" desc={`No results for "${searchQuery}". Try a different username!`}/>
               )}
-              {!searchQuery.trim() && !searched && suggestions.length>0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-bold theme-text pt-1">People on PALSY ♡</p>
-                  {suggestions.map(u=>userRow(u))}
-                </div>
-              )}
-              {!searchQuery.trim() && !searched && suggestions.length===0 && (
-                <EmptyState icon="🔍" title="Find your friends" desc="Type a username or name above — results appear as you type."/>
+              {!searchQuery.trim() && (
+                <EmptyState icon="🔍" title="Find your friends" desc="Search by name or username to find friends — results appear as you type ♡"/>
               )}
             </div>
           )}
