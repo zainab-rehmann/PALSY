@@ -42,7 +42,14 @@ export default function SignupPage() {
     return u === clean(em) || (local !== '' && u === local);
   }
 
+  // Exact-match helper for the case-insensitive display-name check.
+  function escapeIlike(s: string) {
+    return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  }
+
   // Live availability check as the user types (debounced), like Settings.
+  // The display name at signup is the username itself, so the name must be
+  // free BOTH as a username and as a display name.
   useEffect(() => {
     const u = username.trim();
     if (!u) { setUsernameStatus(''); setUsernameMsg(''); return; }
@@ -53,7 +60,9 @@ export default function SignupPage() {
     const t = setTimeout(async () => {
       const supabase = createClient();
       const { data } = await supabase.from('profiles').select('id').eq('username', u).limit(1);
-      if (data && data.length > 0) { setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡'); }
+      if (data && data.length > 0) { setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡'); return; }
+      const { data: nameTaken } = await supabase.from('profiles').select('id').ilike('display_name', escapeIlike(u)).limit(1);
+      if (nameTaken && nameTaken.length > 0) { setUsernameStatus('taken'); setUsernameMsg('✗ That name is already used. Try another! ♡'); }
       else { setUsernameStatus('available'); setUsernameMsg('✓ Username available'); }
     }, 400);
     return () => clearTimeout(t);
@@ -75,9 +84,12 @@ export default function SignupPage() {
     setLoading(true);
     const supabase = createClient();
 
-    // Check username uniqueness
+    // Check username uniqueness (and display-name uniqueness — the display
+    // name at signup is the username itself).
     const { data: existing } = await supabase.from('profiles').select('id').eq('username', username).single();
     if (existing) { setError('This username is already taken. Try another! ♡'); setLoading(false); return; }
+    const { data: nameTaken } = await supabase.from('profiles').select('id').ilike('display_name', escapeIlike(username)).limit(1);
+    if (nameTaken && nameTaken.length > 0) { setError('That name is already used. Try another! ♡'); setLoading(false); return; }
     const { data: signupData, error: signupErr } = await supabase.auth.signUp({
             email, password,
             options: {
