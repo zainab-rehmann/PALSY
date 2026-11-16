@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
+import { useEffect, useState, useRef, useCallback, useLayoutEffect, Fragment } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message, Game } from '@/types';
@@ -48,7 +48,23 @@ export default function DMPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const lastMsgIdRef = useRef<string | null>(null);
+  // Chat scroll: the list must open at the NEWEST messages (bottom), on
+  // first open, after reload, and whenever the list remounts (room tab
+  // switch, DM games panel close). The old effect scrolled only when the
+  // newest id changed via scrollIntoView — in rooms it fired while the
+  // loading spinner was still up (the receipts fetch sits between
+  // setMessages and setLoading(false)), consumed its guard, and the list
+  // then mounted at the top. New rule: an explicit pending-bottom flag,
+  // consumed by a layout effect once the list is actually mounted, plus
+  // near-bottom tracking so incoming messages never yank a reader who
+  // scrolled up to older history.
+  const nearBottomRef = useRef(true);
+  const pendingBottomRef = useRef(true);
+  const lastSeenNewestRef = useRef<string | null>(null);
+  function handleListScroll() {
+    const el = listRef.current;
+    if (el) nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -239,15 +255,34 @@ export default function DMPage() {
     return () => { liveChannels.forEach(c => { try { supabase.removeChannel(c); } catch {} }); };
   }, [router, friendId, gateTick]);
 
-  // Scroll to bottom only when the newest message changes (a new arrival
-  // or the first load) — never when older history is prepended.
+  // A different chat (or a locker unlock) always opens at the bottom.
   useEffect(() => {
+    pendingBottomRef.current = true;
+    nearBottomRef.current = true;
+    lastSeenNewestRef.current = null;
+  }, [friendId, gateTick]);
+
+  // Scroll manager (layout effect: runs after the list is mounted, so a
+  // load-then-loading=false sequence can no longer consume the scroll
+  // while the spinner is up).
+  useLayoutEffect(() => {
+    if (loading || gated) return;
+    const el = listRef.current;
+    if (!el || messages.length === 0) return;
     const last = messages[messages.length - 1];
-    if (last && last.id !== lastMsgIdRef.current) {
-      lastMsgIdRef.current = last.id;
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (pendingBottomRef.current) {
+      pendingBottomRef.current = false;
+      lastSeenNewestRef.current = last.id;
+      el.scrollTop = el.scrollHeight;
+      return;
     }
-  }, [messages]);
+    if (last.id !== lastSeenNewestRef.current) {
+      lastSeenNewestRef.current = last.id;
+      // New arrival: follow only when the reader is already at/near the
+      // bottom — never yank someone reading older messages.
+      if (nearBottomRef.current) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages, loading, gated, showGames]);
 
   // Presence refresh: realtime can lag or drop, so re-read the friend's
   // status every 10s. The re-render is also what flips Online to
@@ -437,6 +472,7 @@ export default function DMPage() {
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       sender: profile, reactions: [],
     };
+    nearBottomRef.current = true; // my own send always lands at the bottom
     setMessages(m=>[...m, temp]);
     setInput('');
     setReplyTo(null);
@@ -790,12 +826,12 @@ async function addReaction(msgId: string, emoji: string) {
       )}
 
       {showGames && dmKey && profile ? (
-        <DMGamesPanel dmKey={dmKey} profile={profile} friendName={friend?.display_name || friend?.username || 'Friend'} accentColor={dmAccent} initialGameId={dmLiveGame?.id || null} onClose={() => setShowGames(false)} />
+        <DMGamesPanel dmKey={dmKey} profile={profile} friendName={friend?.display_name || friend?.username || 'Friend'} accentColor={dmAccent} initialGameId={dmLiveGame?.id || null} onClose={() => { pendingBottomRef.current = true; setShowGames(false); }} />
       ) : (
       <>
       {/* Messages */}
       {/* Messages — my own wallpaper, only I see it */}
-      <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
+      <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
         {hasMore && messages.length > 0 && (
           <div className="flex justify-center pb-1">
             <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-accent)',border:'1px solid var(--color-border)'}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
