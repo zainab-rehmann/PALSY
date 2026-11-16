@@ -118,7 +118,7 @@ export async function notifyGame(
       tictactoe: 'Tic Tac Toe', hangman: 'Hangman',
       numberguess: 'Number Guess', rps: 'Rock Paper Scissors',
       'draw-guess': 'Draw & Guess', trivia: 'Trivia Duel',
-      'dots-boxes': 'Dots & Boxes',
+      'dots-boxes': 'Dots & Boxes', 'crazy-eights': 'Crazy Eights',
     };
     const gameName = label[gameType] || 'a game';
     for (const m of (members || [])) {
