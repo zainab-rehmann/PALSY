@@ -1001,7 +1001,14 @@ export function TriviaDuel({ game, state, profile, accentColor, canPlay, players
     if (phase !== 'playing' || myAnswer || !questionEndsAt || now > questionEndsAt) return;
     const cur = stateRef.current;
     if ((cur.answers || {})[profile.id]) return;
-    await saveState({ ...cur, answers: { ...(cur.answers || {}), [profile.id]: { option, at: Date.now() } } }, false);
+    // Atomic merge via RPC (migration 018): both players' answers land
+    // even when the taps are <1s apart. The old full-state write lost
+    // one answer to last-write-wins (proven live 2026-11-15: all five
+    // of one player's answers wiped in a single duel).
+    const at = Date.now();
+    const supabase = createClient();
+    const { data } = await supabase.rpc('trivia_answer', { p_game_id: game.id, p_option: option, p_qi: qi, p_at: at });
+    if (data) onUpdate({ ...cur, answers: { ...(cur.answers || {}), [profile.id]: { option, at } } });
   }
 
   async function advance() {
