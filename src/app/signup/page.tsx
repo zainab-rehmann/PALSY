@@ -35,11 +35,22 @@ export default function SignupPage() {
   // as you type, so a pasted/autofilled email used to slip through as a
   // username (e.g. "maya@gmail.com" -> "mayagmailcom"). Refuse any name
   // that is just the email (or its local part) with punctuation stripped.
+  // The username box caps input at 20 characters, so an email pasted in is
+  // silently truncated — an exact-equality check would miss it (proven live:
+  // 'verifytest@example.com' became 'verifytestexamplec' and slipped past).
+  // Flag the name when it equals the sanitized email or its local part,
+  // equals either truncated to 20 chars, or is a prefix of the sanitized
+  // email longer than the local part (local part + start of the domain).
   function emailDerivedName(u: string, em: string): boolean {
     if (!u || !em) return false;
     const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const cEmail = clean(em);
     const local = clean(em.split('@')[0] || '');
-    return u === clean(em) || (local !== '' && u === local);
+    if (!cEmail) return false;
+    if (u === cEmail || (local !== '' && u === local)) return true;
+    if (u === cEmail.slice(0, 20) || (local !== '' && u === local.slice(0, 20))) return true;
+    if (local !== '' && u.length > local.length && cEmail.startsWith(u)) return true;
+    return false;
   }
 
   // Exact-match helper for the case-insensitive display-name check.
