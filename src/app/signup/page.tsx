@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Mail, Lock, User, ArrowRight, Palette } from 'lucide-react';
@@ -20,6 +20,44 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState('');
+  const [usernameMsg, setUsernameMsg] = useState('');
+
+  // Username rules (same as Settings): lowercase letters, numbers, underscores, 3–20 chars.
+  function usernameError(u: string): string {
+    if (u.length < 3) return 'Usernames need at least 3 characters.';
+    if (u.length > 20) return 'Usernames can be at most 20 characters.';
+    if (!/^[a-z0-9_]+$/.test(u)) return 'Only lowercase letters, numbers and underscores — no spaces.';
+    return '';
+  }
+
+  // An email must NEVER become a username. The input sanitizer strips @ and .
+  // as you type, so a pasted/autofilled email used to slip through as a
+  // username (e.g. "maya@gmail.com" -> "mayagmailcom"). Refuse any name
+  // that is just the email (or its local part) with punctuation stripped.
+  function emailDerivedName(u: string, em: string): boolean {
+    if (!u || !em) return false;
+    const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const local = clean(em.split('@')[0] || '');
+    return u === clean(em) || (local !== '' && u === local);
+  }
+
+  // Live availability check as the user types (debounced), like Settings.
+  useEffect(() => {
+    const u = username.trim();
+    if (!u) { setUsernameStatus(''); setUsernameMsg(''); return; }
+    const err = usernameError(u);
+    if (err) { setUsernameStatus('invalid'); setUsernameMsg(err); return; }
+    if (emailDerivedName(u, email)) { setUsernameStatus('invalid'); setUsernameMsg("Please pick a username that isn't your email address ♡"); return; }
+    setUsernameStatus('checking'); setUsernameMsg('Checking…');
+    const t = setTimeout(async () => {
+      const supabase = createClient();
+      const { data } = await supabase.from('profiles').select('id').eq('username', u).limit(1);
+      if (data && data.length > 0) { setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡'); }
+      else { setUsernameStatus('available'); setUsernameMsg('✓ Username available'); }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [username, email]);
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
@@ -27,7 +65,10 @@ export default function SignupPage() {
     if (!email || !username || !password || !confirm) { setError('Please fill in all fields.'); return; }
     if (!validateEmail(email)) { setError('Please enter a valid email address.'); return; }
     if (username.length < 3) { setError('Username must be at least 3 characters.'); return; }
+    if (username.length > 20) { setError('Username can be at most 20 characters.'); return; }
     if (!/^[a-z0-9_]+$/.test(username)) { setError('Username can only contain lowercase letters, numbers, and underscores.'); return; }
+    if (emailDerivedName(username, email)) { setError("Please pick a username that isn't your email address ♡"); return; }
+    if (usernameStatus === 'taken') { setError('This username is already taken. Try another! ♡'); return; }
     if (!isPasswordValid(password)) { setError('Password does not meet all requirements.'); return; }
     if (password !== confirm) { setError('Passwords do not match.'); return; }
 
@@ -126,10 +167,14 @@ export default function SignupPage() {
 
             <div className="relative">
               <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{color:'var(--color-text-muted)'}}/>
-              <input type="text" placeholder="Username (e.g. sunny_girl)" value={username}
+              <input type="text" placeholder="Username (e.g. sunny_girl)" value={username} maxLength={20}
                 onChange={e=>setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,''))}
-                className="theme-input w-full py-3 pl-10 pr-4 text-sm" autoComplete="username"/>
+                className="theme-input w-full py-3 pl-10 pr-4 text-sm" autoComplete="off"/>
             </div>
+            <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Lowercase letters, numbers and underscores only, 3–20 characters, no spaces. Pick your own name — never your email address.</p>
+            {usernameMsg && (
+              <p className="text-xs font-bold" style={{color:usernameStatus==='available'?'#22C55E':usernameStatus==='checking'?'var(--color-text-muted)':'#FF6B6B'}}>{usernameMsg}</p>
+            )}
 
             <div className="relative">
               <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{color:'var(--color-text-muted)'}}/>
