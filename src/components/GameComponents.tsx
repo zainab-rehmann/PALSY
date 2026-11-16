@@ -231,7 +231,7 @@ export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate
           <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>Tap Restart above to play again together.</p>
         </div>
       ) : !canPlay ? (
-        <p className="font-bold text-center theme-text">Waiting for the second player to join…</p>
+        <p className="text-sm font-bold text-center theme-text">Waiting for the second player to join…</p>
       ) : (
         <p className="text-sm font-bold text-center theme-text">{myTurn?'Your turn! ✨':'Waiting for other player...'}</p>
       )}
