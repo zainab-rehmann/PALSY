@@ -252,26 +252,13 @@ export function RPS({ game, state, profile, accentColor, canPlay, onUpdate }: an
   async function choose(choice: string) {
     if (!profile || !canPlay || state.choices[profile.id]) return;
     const supabase = createClient();
-    // Re-read the freshest state first: both players often choose at the
-    // same moment, and writing from a stale snapshot would erase the
-    // other player's choice, leaving both screens stuck on "Waiting".
-    const { data: fresh } = await supabase.from('games').select('state').eq('id', game.id).single();
-    const base = (fresh?.state as any) || state;
-    if (base.choices?.[profile.id]) { onUpdate(base); return; }
-    const newChoices = { ...(base.choices || {}), [profile.id]: choice };
-    const players = Object.keys(newChoices);
-    let winner: string | null = null;
-    if (players.length === 2) {
-      const [p1,p2] = players;
-      const [c1,c2] = [newChoices[p1],newChoices[p2]];
-      const beats: Record<string,string> = { rock:'scissors', scissors:'paper', paper:'rock' };
-      if (c1===c2) winner='draw';
-      else if (beats[c1]===c2) winner=p1;
-      else winner=p2;
-    }
-    const newState = { ...base, choices: newChoices, winner };
-    await supabase.from('games').update({ state: newState, status: winner?'finished':'active', winner_id: winner && winner!=='draw' ? winner : null }).eq('id', game.id);
-    onUpdate(newState);
+    // Atomic merge via the rps_choice RPC (migration 022). The old
+    // read-modify-write (re-read, merge, full-state UPDATE) lost a
+    // choice when both players clicked at nearly the same moment —
+    // proven live 2026-11-16: the row kept only the second writer's
+    // choice. The RPC locks the row, merges, and scores in one UPDATE.
+    const { data } = await supabase.rpc('rps_choice', { p_game_id: game.id, p_choice: choice });
+    if (data) onUpdate(data);
   }
   const myChoice = profile && state.choices[profile.id];
   return (
