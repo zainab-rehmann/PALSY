@@ -10,7 +10,7 @@ import {
   Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star
 } from 'lucide-react';
 import Link from 'next/link';
-import { GAME_META, initialStateFor, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, dealCrazyEights, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights } from '@/components/GameComponents';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
@@ -1430,9 +1430,13 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
     await supabase.from('game_players').upsert({ game_id: g.id, user_id: profile.id }, { onConflict: 'game_id,user_id' });
     const { data: plist } = await supabase.from('game_players').select('*').eq('game_id', g.id);
     const count = (plist || []).length;
-    const st: any = { ...(g.state as any) };
+    let st: any = { ...(g.state as any) };
     if (g.type === 'tictactoe' && !st.playerO && st.playerX !== profile.id) {
       st.playerO = profile.id;
+    }
+    if (g.type === 'crazy-eights') {
+      // Deal the joining player their 7 cards from the deck.
+      st = dealCrazyEights(st, profile.id);
     }
     // Touch the game row so every open screen refreshes its player list
     // and the waiting banner lifts the moment the second player joins.
@@ -1453,6 +1457,13 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       fresh.currentPlayer = fresh.playerX;
     }
     if (game.type === 'rps') fresh.round = (gameState.round || 1) + 1;
+    if (game.type === 'crazy-eights') {
+      // Re-deal the second player from the fresh deck.
+      const prevHands = (gameState.hands || {}) as Record<string, string[]>;
+      for (const pid of Object.keys(prevHands)) {
+        if (pid !== game.created_by) Object.assign(fresh, dealCrazyEights(fresh, pid));
+      }
+    }
     const { data } = await supabase.from('games').update({ state: fresh, status: 'active', winner_id: null }).eq('id', game.id).select().single();
     if (data) {
       setGame(data as Game);
@@ -1498,7 +1509,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         <button onClick={closeGame} className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
           <ArrowLeft size={16} style={{color:accentColor}}/>
         </button>
-        <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':gameType==='draw-guess'?'Draw & Guess':gameType==='trivia'?'Trivia Duel':gameType==='dots-boxes'?'Dots & Boxes':'Hangman'}</span>
+        <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':gameType==='draw-guess'?'Draw & Guess':gameType==='trivia'?'Trivia Duel':gameType==='dots-boxes'?'Dots & Boxes':gameType==='crazy-eights'?'Crazy Eights':'Hangman'}</span>
         <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{players.length} player{players.length===1?'':'s'} in</span>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
@@ -1519,6 +1530,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       {gameType==='draw-guess' && game && <DrawGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
     </div>
   );
 }

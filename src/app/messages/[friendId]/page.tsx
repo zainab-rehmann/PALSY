@@ -15,7 +15,7 @@ import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSni
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LockerPrompt from '@/components/LockerPrompt';
-import { GAME_META, initialStateFor, restartStateFor, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights } from '@/components/GameComponents';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
@@ -1178,9 +1178,13 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
     await supabase.from('game_players').upsert({ game_id: g.id, user_id: profile.id }, { onConflict: 'game_id,user_id' });
     const { data: plist } = await supabase.from('game_players').select('*').eq('game_id', g.id);
     const count = (plist || []).length;
-    const st: any = { ...(g.state as any) };
+    let st: any = { ...(g.state as any) };
     if (g.type === 'tictactoe' && !st.playerO && st.playerX !== profile.id) {
       st.playerO = profile.id;
+    }
+    if (g.type === 'crazy-eights') {
+      // Deal the joining player their 7 cards from the deck.
+      st = dealCrazyEights(st, profile.id);
     }
     // Touch the game row so every open screen refreshes its player list
     // and the waiting banner lifts the moment the second player is in.
@@ -1273,7 +1277,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
         <button onClick={closeGame} className="p-2 rounded-xl" style={{ background: 'rgba(var(--color-overlay-rgb),0.7)' }}>
           <ArrowLeft size={16} style={{ color: accentColor }} />
         </button>
-        <span className="font-black theme-text">{gameType === 'tictactoe' ? 'Tic Tac Toe' : gameType === 'rps' ? 'Rock Paper Scissors' : gameType === 'number-guess' ? 'Number Guess' : gameType === 'draw-guess' ? 'Draw & Guess' : gameType === 'trivia' ? 'Trivia Duel' : gameType === 'dots-boxes' ? 'Dots & Boxes' : 'Hangman'}</span>
+        <span className="font-black theme-text">{gameType === 'tictactoe' ? 'Tic Tac Toe' : gameType === 'rps' ? 'Rock Paper Scissors' : gameType === 'number-guess' ? 'Number Guess' : gameType === 'draw-guess' ? 'Draw & Guess' : gameType === 'trivia' ? 'Trivia Duel' : gameType === 'dots-boxes' ? 'Dots & Boxes' : gameType === 'crazy-eights' ? 'Crazy Eights' : 'Hangman'}</span>
         <span className="text-xs ml-auto" style={{ color: 'var(--color-text-muted)' }}>{players.length} player{players.length === 1 ? '' : 's'} in</span>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
@@ -1294,6 +1298,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
       {gameType === 'draw-guess' && game && <DrawGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
     </div>
   );
 }
