@@ -25,6 +25,8 @@ export default function SettingsPage() {
   const [username, setUsername] = useState('');
   const [usernameStatus, setUsernameStatus] = useState<''|'checking'|'available'|'taken'|'invalid'>('');
   const [usernameMsg, setUsernameMsg] = useState('');
+  const [displayNameStatus, setDisplayNameStatus] = useState<''|'checking'|'available'|'taken'>('');
+  const [displayNameMsg, setDisplayNameMsg] = useState('');
   const [bio, setBio] = useState('');
   const [theme, setTheme] = useState<Theme>('blue');
   const [wallpaper, setWallpaper] = useState<string>('default');
@@ -109,6 +111,25 @@ export default function SettingsPage() {
     return '';
   }
 
+  // Display-name uniqueness: one name, one person — like the username,
+  // checked live as the user types (case-insensitive, exact match).
+  function escapeIlike(s: string) {
+    return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  }
+  useEffect(() => {
+    if (!profile) return;
+    const d = displayName.trim();
+    if (d === (profile.display_name || '') || d === '') { setDisplayNameStatus(''); setDisplayNameMsg(''); return; }
+    setDisplayNameStatus('checking'); setDisplayNameMsg('Checking…');
+    const t = setTimeout(async () => {
+      const supabase = createClient();
+      const { data } = await supabase.from('profiles').select('id').ilike('display_name', escapeIlike(d)).neq('id', profile.id).limit(1);
+      if (data && data.length > 0) { setDisplayNameStatus('taken'); setDisplayNameMsg('✗ That name is taken. Try another! ♡'); }
+      else { setDisplayNameStatus('available'); setDisplayNameMsg('✓ Name available'); }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [displayName, profile]);
+
   // Live availability check as the user types (debounced).
   useEffect(() => {
     if (!profile) return;
@@ -129,7 +150,9 @@ export default function SettingsPage() {
   async function saveProfile() {
     if (!profile) return;
     const u = username.trim();
+    const d = displayName.trim();
     const usernameChanged = u !== profile.username;
+    const displayChanged = d !== (profile.display_name || '');
     if (usernameChanged) {
       const err = usernameError(u);
       if (err) { setUsernameStatus('invalid'); setUsernameMsg(err); return; }
@@ -138,25 +161,37 @@ export default function SettingsPage() {
       const { data: taken } = await supabase.from('profiles').select('id').eq('username', u).neq('id', profile.id).limit(1);
       if (taken && taken.length > 0) { setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡'); return; }
     }
+    if (displayChanged && d !== '') {
+      // Re-check right before saving, so a name taken a moment ago is refused.
+      const supabase = createClient();
+      const { data: nameTaken } = await supabase.from('profiles').select('id').ilike('display_name', escapeIlike(d)).neq('id', profile.id).limit(1);
+      if (nameTaken && nameTaken.length > 0) { setDisplayNameStatus('taken'); setDisplayNameMsg('✗ That name is taken. Try another! ♡'); return; }
+    }
     setSaving(true);
     const supabase = createClient();
-    const updates: Record<string, unknown> = { display_name: displayName, bio, theme, wallpaper, updated_at: new Date().toISOString() };
+    const updates: Record<string, unknown> = { display_name: d, bio, theme, wallpaper, updated_at: new Date().toISOString() };
     if (usernameChanged) updates.username = u;
     const { error } = await supabase.from('profiles').update(updates).eq('id', profile.id);
     if (error) {
-      // Race safety: the database unique rule is the final guard.
+      // Race safety: the database unique rules are the final guard.
+      // Route the message by which rule fired (username vs display name).
       if ((error as { code?: string }).code === '23505' || /duplicate|unique/i.test(error.message)) {
-        setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡');
+        if (/display_name/i.test(error.message)) {
+          setDisplayNameStatus('taken'); setDisplayNameMsg('✗ That name is taken. Try another! ♡');
+        } else {
+          setUsernameStatus('taken'); setUsernameMsg('✗ That username is taken. Try another! ♡');
+        }
       } else {
         setUsernameMsg('Could not save just now. Please try again.');
       }
       setSaving(false);
       return;
     }
-    if (usernameChanged) {
-      setProfile(p => p ? { ...p, username: u } : p);
-      setUsernameStatus(''); setUsernameMsg('Username updated ✓');
+    if (usernameChanged || displayChanged) {
+      setProfile(p => p ? { ...p, ...(usernameChanged ? { username: u } : {}), ...(displayChanged ? { display_name: d } : {}) } : p);
     }
+    if (usernameChanged) { setUsernameStatus(''); setUsernameMsg('Username updated ✓'); }
+    if (displayChanged) { setDisplayNameStatus(''); setDisplayNameMsg(d === '' ? '' : 'Name updated ✓'); }
     document.documentElement.setAttribute('data-theme', theme);
     setSaving(false); setSaved(true); setTimeout(()=>setSaved(false),2000);
   }
@@ -281,7 +316,11 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="text-xs font-bold mb-1.5 block" style={{color:'var(--color-text-muted)'}}>Display Name</label>
-                <input type="text" value={displayName} onChange={e=>setDisplayName(e.target.value)} className="theme-input w-full py-3 px-4 text-sm" placeholder="Your display name"/>
+                <input type="text" value={displayName} maxLength={30} onChange={e=>setDisplayName(e.target.value)} className="theme-input w-full py-3 px-4 text-sm" placeholder="Your display name"/>
+                <p className="text-xs mt-1.5" style={{color:'var(--color-text-muted)'}}>One name, one person — display names must be unique, just like usernames, so search finds the right person. Leave it blank to show your username instead.</p>
+                {displayNameMsg && (
+                  <p className="text-xs mt-1.5 font-bold" style={{color:displayNameStatus==='available'||displayNameMsg==='Name updated ✓'?'#22C55E':displayNameStatus==='checking'?'var(--color-text-muted)':'#FF6B6B'}}>{displayNameMsg}</p>
+                )}
               </div>
               <div>
                 <label className="text-xs font-bold mb-1.5 block" style={{color:'var(--color-text-muted)'}}>Bio</label>
