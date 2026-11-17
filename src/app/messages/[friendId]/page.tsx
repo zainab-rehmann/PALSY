@@ -218,6 +218,14 @@ export default function DMPage() {
           const old = payload.old as Message;
           if (old?.id) setMessages(m=>m.filter(x=>x.id!==old.id));
         })
+        // Reactions arrive live: when anyone reacts (or removes a reaction)
+        // on a message, refresh that message's chips without a reload.
+        // (message_reactions has no room/dm scope column, so no filter —
+        // refreshReactions is a no-op for messages not in this chat.)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, (payload) => {
+          const mid = (payload.new as any)?.message_id || (payload.old as any)?.message_id;
+          if (mid) refreshReactions(mid);
+        })
         .subscribe();
 
       // Typing indicator (ephemeral broadcast, no database writes)
