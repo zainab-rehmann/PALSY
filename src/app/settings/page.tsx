@@ -430,8 +430,8 @@ export default function SettingsPage() {
                 </div>
                 <p className="text-xs pt-3" style={{color:'var(--color-text-muted)',borderTop:'1px solid var(--color-border)'}}>
                   Muted rooms never pop up and never add bell noise. You can mute or unmute a room in its Settings tab. The bell always keeps your latest notifications, even with pop-ups off.
-                  </p>
-                </div>
+                </p>
+              </div>
               <div className="theme-card p-6 space-y-4">
                 <p className="font-bold theme-text flex items-center gap-2">{soundsMuted ? <VolumeX size={16} style={{color:'var(--color-accent)'}}/> : <Volume2 size={16} style={{color:'var(--color-accent)'}}/>}Game sounds</p>
                 <div className="flex items-center gap-3">
