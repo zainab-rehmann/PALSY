@@ -8,9 +8,11 @@
 // key is still honoured as a fallback), default ON (sounds play).
 // Sounds must never break a game: every call is wrapped so a missing
 // AudioContext just means silence.
-// Verification: every sound actually played is appended to the tiny
-// in-memory log window.__palsySounds ([{ name, at }], newest last,
-// capped at 100) — a browser cannot hear, so tests read the log.
+// Verification: every sound the game fires (after the mute check) is
+// appended to the tiny in-memory log window.__palsySounds ([{ name, at }],
+// newest last, capped at 100) — a browser cannot hear, so tests read the
+// log. A fired sound is logged even if the device's audio backend cannot
+// render it; a muted sound is never logged.
 'use client';
 import { useEffect, useRef, useState } from 'react';
 
@@ -157,11 +159,14 @@ export function setSoundsMuted(muted: boolean, userId?: string | null): void {
 export function playSound(kind: SoundKind): void {
   try {
     if (isSoundsMuted()) return;
+    // Log first: the game fired this sound. If the device's audio backend
+    // cannot render it (no AudioContext, a throw while scheduling), the
+    // attempt is still recorded — the log proves the call fired.
+    logPlayed(kind);
     const at = audioCtx();
     if (!at) return;
     const now = at.currentTime + 0.01;
     for (const [freq, delay, dur, type] of SOUND_MAP[kind]) tone(at, freq, now + delay, dur, type || 'sine');
-    logPlayed(kind);
   } catch {
     // Sounds must never break the game.
   }
@@ -181,10 +186,10 @@ export interface ToneOptions {
 export function playTone(opts: ToneOptions): void {
   try {
     if (isSoundsMuted()) return;
+    logPlayed('tone');
     const at = audioCtx();
     if (!at) return;
     tone(at, opts.frequency, at.currentTime + 0.01 + (opts.delay ?? 0), opts.duration ?? 0.15, opts.waveform ?? 'sine', opts.gain ?? 0.12);
-    logPlayed('tone');
   } catch {
     // Sounds must never break the game.
   }
@@ -196,10 +201,10 @@ const PAD_FREQUENCIES: readonly [number, number, number, number] = [262, 330, 39
 export function playPadTone(pad: PadIndex): void {
   try {
     if (isSoundsMuted()) return;
+    logPlayed(`pad${pad}`);
     const at = audioCtx();
     if (!at) return;
     tone(at, PAD_FREQUENCIES[pad], at.currentTime + 0.01, 0.35, 'sine', 0.14);
-    logPlayed(`pad${pad}`);
   } catch {
     // Sounds must never break the game.
   }
