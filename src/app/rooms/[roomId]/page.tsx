@@ -1596,7 +1596,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         </button>
         <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':gameType==='draw-guess'?'Draw & Guess':gameType==='trivia'?'Trivia Duel':gameType==='dots-boxes'?'Dots & Boxes':gameType==='crazy-eights'?'Crazy Eights':'Hangman'}</span>
         <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{players.length} player{players.length===1?'':'s'} in</span>
-        <SoundToggle/>
+        <SoundToggle userId={profile?.id}/>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
           style={{background:accentColor, opacity: bothIn ? 1 : 0.45}}>
