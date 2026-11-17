@@ -6,6 +6,7 @@
 import { useEffect, useState, useRef, type PointerEvent as RPointerEvent } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Eraser } from 'lucide-react';
+import { playSound, useWinnerSound, useTurnSound } from '@/lib/sounds';
 
 const DRAW_WORDS: { w: string; hint: string }[] = [
   { w: 'cat', hint: 'animal' }, { w: 'dog', hint: 'animal' }, { w: 'butterfly', hint: 'animal' },
@@ -199,6 +200,9 @@ export const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = 
 };
 
 export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
+  const myTurn = state.currentPlayer === profile?.id;
+  useWinnerSound(state.winner === 'draw' ? 'draw' : state.winner?.player ?? null, profile?.id);
+  useTurnSound(myTurn, canPlay && !state.winner);
   async function makeMove(idx: number) {
     if (!profile || !canPlay || !state.playerO || state.board[idx] || state.winner) return;
     if (state.currentPlayer !== profile.id) return;
@@ -208,6 +212,7 @@ export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate
     const winner = checkWinner(newBoard);
     const nextPlayer = state.currentPlayer===state.playerX ? state.playerO : state.playerX;
     const newState = { ...state, board: newBoard, currentPlayer: nextPlayer, winner };
+    playSound('pop');
     const supabase = createClient();
     await supabase.from('games').update({ state: newState, status: winner?'finished':'active', winner_id: winner && winner!=='draw' ? winner.player : null }).eq('id', game.id);
     onUpdate(newState);
@@ -222,7 +227,6 @@ export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate
     return null;
   }
 
-  const myTurn = state.currentPlayer === profile?.id;
   return (
     <div className="space-y-4">
       {state.winner ? (
@@ -249,8 +253,10 @@ export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate
 }
 
 export function RPS({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
+  useWinnerSound(state.winner, profile?.id);
   async function choose(choice: string) {
     if (!profile || !canPlay || state.choices[profile.id]) return;
+    playSound('pop');
     const supabase = createClient();
     // Atomic merge via the rps_choice RPC (migration 022). The old
     // read-modify-write (re-read, merge, full-state UPDATE) lost a
@@ -311,6 +317,18 @@ export function NumberGuess({ game, state, profile, accentColor, canPlay, player
   const iAmSetter = state.setterId ? state.setterId === profile?.id : false;
   const iAmGuesser = state.guesserId ? state.guesserId === profile?.id : !state.setterId; // legacy: anyone guesses
   const finished = !!state.winner;
+  useWinnerSound(state.winner, profile?.id);
+  // A wrong guess gets a soft "wrong" sound; a right one is covered by the win jingle.
+  const prevGuessCount = useRef(0);
+  useEffect(() => {
+    const n = (state.guesses || []).length;
+    if (n > prevGuessCount.current) {
+      const last = state.guesses[n - 1];
+      if (last && !last.correct) playSound('wrong');
+    }
+    prevGuessCount.current = n;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.guesses]);
 
   async function saveState(newState: any, done: boolean) {
     const supabase = createClient();
@@ -336,6 +354,7 @@ export function NumberGuess({ game, state, profile, accentColor, canPlay, player
     if (!iAmGuesser) return;
     const n = parseInt(guess);
     if (isNaN(n) || n < 1 || n > 100 || finished) return;
+    playSound('pop');
     const isCorrect = n === state.secret;
     const newGuesses = [...(state.guesses || []), { player: profile?.id, value: n, correct: isCorrect, hint: n < state.secret ? 'Too low! 📉' : 'Too high! 📈' }];
     await saveState({ ...state, guesses: newGuesses, winner: isCorrect ? profile?.id : null, phase: isCorrect ? 'finished' : 'playing' }, isCorrect);
@@ -431,6 +450,15 @@ export function Hangman({ game, state, profile, accentColor, canPlay, players, o
   const isWon = word.length > 0 && word.split('').every((l: string) => guessed.includes(l));
   const isLost = wrongGuesses.length >= maxWrong;
   const finished = isWon || isLost || phase === 'finished';
+  useWinnerSound(state.winner, profile?.id);
+  // Right letter = happy chime, wrong letter = soft "wrong" sound.
+  const prevLetterCounts = useRef({ g: 0, w: 0 });
+  useEffect(() => {
+    if (guessed.length > prevLetterCounts.current.g) playSound('correct');
+    else if (wrongGuesses.length > prevLetterCounts.current.w) playSound('wrong');
+    prevLetterCounts.current = { g: guessed.length, w: wrongGuesses.length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guessed.length, wrongGuesses.length]);
 
   async function saveState(newState: any, done: boolean) {
     const supabase = createClient();
@@ -454,6 +482,7 @@ export function Hangman({ game, state, profile, accentColor, canPlay, players, o
 
   async function guessLetter(letter: string) {
     if (!iAmGuesser || guessed.includes(letter) || wrongGuesses.includes(letter) || finished || !word) return;
+    playSound('pop');
     const isCorrect = word.includes(letter);
     const newGuessed = isCorrect ? [...guessed, letter] : guessed;
     const newWrong = isCorrect ? wrongGuesses : [...wrongGuesses, letter];
@@ -599,6 +628,14 @@ export function DrawGuess({ game, state, profile, accentColor, canPlay, players,
   const finished = phase === 'finished';
   const roundEndsAt: number | null = state.roundEndsAt || null;
   const remaining = roundEndsAt ? Math.max(0, Math.ceil((roundEndsAt - now) / 1000)) : 60;
+  useWinnerSound(state.winner, profile?.id);
+  // Round over (guessed or timed out) gets the round chime.
+  const prevDgPhase = useRef(phase);
+  useEffect(() => {
+    if (prevDgPhase.current === 'playing' && phase === 'roundEnd') playSound('round');
+    prevDgPhase.current = phase;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   async function saveState(newState: any, done: boolean) {
     const supabase = createClient();
@@ -750,6 +787,7 @@ export function DrawGuess({ game, state, profile, accentColor, canPlay, players,
       const curWord = ((cur.words || [])[(cur.round || 1) - 1] || {}).w || word;
       const correct = g === curWord.toLowerCase();
       const newGuesses = [...(cur.guesses || []), { player: profile?.id, text: guessInput.trim(), correct }];
+      playSound(correct ? 'correct' : 'wrong');
       if (correct) {
         const curScores = cur.scores || {};
         const newScores = { ...curScores, [profile.id]: (curScores[profile.id] || 0) + 10, [cur.drawerId]: (curScores[cur.drawerId] || 0) + 5 };
@@ -934,6 +972,17 @@ export function TriviaDuel({ game, state, profile, accentColor, canPlay, players
   const theirAnswer = otherId ? answers[otherId] : null;
   const playerIds = (players || []).map((p: any) => p.user_id);
   const bothAnswered = playerIds.length >= 2 ? playerIds.every((id: string) => answers[id]) : Object.keys(answers).length >= 2;
+  useWinnerSound(state.winner, profile?.id);
+  // On reveal: a happy chime if I scored, a soft "wrong" if I answered wrong.
+  const prevTriviaPhase = useRef(phase);
+  useEffect(() => {
+    if (prevTriviaPhase.current === 'playing' && phase === 'reveal') {
+      const pts = (state.lastPoints || {})[profile?.id];
+      if (pts !== undefined) playSound(pts > 0 ? 'correct' : 'wrong');
+    }
+    prevTriviaPhase.current = phase;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   async function saveState(newState: any, done: boolean) {
     const supabase = createClient();
@@ -988,6 +1037,7 @@ export function TriviaDuel({ game, state, profile, accentColor, canPlay, players
     if (phase !== 'playing' || myAnswer || !questionEndsAt || now > questionEndsAt) return;
     const cur = stateRef.current;
     if ((cur.answers || {})[profile.id]) return;
+    playSound('pop');
     // Atomic merge via RPC (migration 018): both players' answers land
     // even when the taps are <1s apart. The old full-state write lost
     // one answer to last-write-wins (proven live 2026-11-15: all five
@@ -1154,6 +1204,8 @@ export function DotsBoxes({ game, state, profile, accentColor, canPlay, players,
   const claimedCount = Object.keys(boxes).length;
   const lastClaimed: number = state.lastClaimed || 0;
   const lastMoveBy: string | null = state.lastMoveBy || null;
+  useWinnerSound(state.winner, profile?.id);
+  useTurnSound(myTurn, canPlay && !finished);
 
   async function saveState(newState: any, done: boolean) {
     const supabase = createClient();
@@ -1176,6 +1228,7 @@ export function DotsBoxes({ game, state, profile, accentColor, canPlay, players,
     }
     const curScores: Record<string, number> = { ...(cur.scores || {}) };
     curScores[profile.id] = (curScores[profile.id] || 0) + claimed;
+    playSound(claimed > 0 ? 'claim' : 'pop');
     const total = Object.keys(curBoxes).length;
     const next: any = { ...cur, edges: curEdges, boxes: curBoxes, scores: curScores, lastMoveBy: profile.id, lastClaimed: claimed };
     if (total >= 16) {
@@ -1276,6 +1329,8 @@ export function CrazyEights({ game, state, profile, accentColor, canPlay, player
   const deck: string[] = state.deck || [];
   const myTurn = state.turn === profile?.id;
   const currentSuit: string = state.currentSuit || (top ? ceSuit(top) : 'S');
+  useWinnerSound(state.winner, profile?.id);
+  useTurnSound(myTurn, canPlay && !finished);
 
   async function saveState(newState: any, done: boolean) {
     const supabase = createClient();
@@ -1307,6 +1362,7 @@ export function CrazyEights({ game, state, profile, accentColor, canPlay, player
     hand.splice(idx, 1);
     curHands[profile.id] = hand;
     curDiscard.push(card);
+    playSound('card');
     const next: any = { ...cur, hands: curHands, discard: curDiscard, currentSuit: suit };
     if (hand.length === 0) {
       next.phase = 'finished';
@@ -1349,6 +1405,7 @@ export function CrazyEights({ game, state, profile, accentColor, canPlay, player
     const drawn = deckNow.shift()!;
     const curHands: Record<string, string[]> = { ...(cur.hands || {}) };
     curHands[profile.id] = [...(curHands[profile.id] || []), drawn];
+    playSound('pop');
     const next: any = { ...cur, deck: deckNow, discard: discardNow, hands: curHands };
     // If the drawn card can be played, the turn stays with you so you
     // can play it right away; otherwise the turn passes to your friend.
