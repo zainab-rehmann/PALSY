@@ -316,6 +316,14 @@ export default function RoomPage() {
           return { ...prev, [old.message_id]: list };
         });
       })
+      // Reactions arrive live: when anyone reacts (or removes a reaction)
+      // on a message, refresh that message's chips without a reload.
+      // (message_reactions has no room_id, so no filter — refreshReactions
+      // is a no-op for messages not in this room.)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, (payload) => {
+        const mid = (payload.new as any)?.message_id || (payload.old as any)?.message_id;
+        if (mid) refreshReactions(mid);
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [router, roomId, gateTick]);
