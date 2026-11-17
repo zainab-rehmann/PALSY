@@ -6,17 +6,19 @@
 
 ## ✨ Features
 
-- 🎨 Blue & Pink themes (user-selectable, persisted)
-- 🔐 Supabase Auth (email/password)
-- 👥 Friends system (search, add, remove)
+- 🎨 Three themes (Soft Blue, Soft Pink, Autumn Dark) — user-selectable, persisted
+- 🔐 Supabase Auth (email/password) — signup never uses your email as your username
+- 👥 Friends system (search, add, remove) — display names are unique, one name one person
 - 🔒 Private accounts (bio hidden from strangers, requests need approval)
-- 🏠 Rooms (create, join by invite code, optional entry code, customize with presets)
-- 💬 Real-time messaging (private DMs + room chat, media + voice, read ticks, typing indicators)
-- 😊 Full emoji picker (1,923 emojis) + 16 quick reactions
-- ↩️ Reply, pin and star messages; export / clear chat
-- 🎮 4 multiplayer games: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman
+- 🏠 Rooms (create, join by invite code, optional entry code, theme + picture changeable by any member)
+- 💬 Real-time messaging (private DMs + room chat, media + voice, read ticks, typing indicators, online / last-seen / in-chat presence)
+- 🖼️ Chat wallpapers (10 presets + your own photo) and per-chat themes
+- 🔐 Optional chat locker — lock any DM or room behind a code, with private notifications
+- 😊 Full emoji picker (1,923 emojis) + 16 quick reactions in DMs and rooms
+- ↩️ Reply, pin and star messages; export / clear chat; select + bulk delete
+- 🎮 8 multiplayer games, in rooms and in DMs: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman, Draw & Guess, Trivia Duel (72-question bank), Dots & Boxes, Crazy Eights — with game sounds (mute in Settings or in any game)
 - 🔔 Notification bell + pop-ups (mute per room)
-- 📱 Fully responsive (mobile + desktop)
+- 📱 Fully responsive (mobile + desktop) and installable as an app (PWA)
 - 🌐 Ready for Vercel deployment
 
 ---
@@ -33,9 +35,8 @@ npm install
 ### 2. Set up Supabase
 1. Create a project at [supabase.com](https://supabase.com)
 2. Go to your project → SQL Editor
-3. Run the migrations in order: `supabase/migrations/001_initial.sql`, then `002`–`005` and `007`–`012`
-4. Set up Storage bucket named `avatars` (public)
-5. Set up Storage bucket named `media` (public)
+3. Run the migrations in order: `supabase/migrations/001_initial.sql`, then `002`–`022`
+4. Set up a Storage bucket named `media` (public)
 
 ### 3. Configure environment variables
 ```bash
@@ -74,9 +75,9 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## 🗄️ Database
 
-Run the migrations in `supabase/migrations/` in order in your Supabase SQL Editor (001, then 002–005 and 007–012). The full consolidated schema is also kept at `supabase/palsy-supabase-schema-2026-11-10.sql` for reference.
+Run the migrations in `supabase/migrations/` in order in your Supabase SQL Editor (001, then 002–022). The full consolidated schema is also kept at `supabase/palsy-supabase-schema-2026-11-10.sql` for reference.
 
-Tables: `profiles`, `friend_requests`, `friendships`, `rooms`, `room_members`, `messages`, `message_reactions`, `notifications`, `games`, `game_players`
+Tables: `profiles`, `friend_requests`, `friendships`, `rooms`, `room_members`, `messages`, `message_reactions`, `notifications`, `games`, `game_players`, `message_receipts`, `room_entry_codes`, `locker_codes`, `locked_chats`
 
 All tables have Row Level Security (RLS) enabled.
 
