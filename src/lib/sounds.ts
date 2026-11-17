@@ -51,6 +51,10 @@ function logPlayed(name: string): void {
   }
 }
 
+// The log exists from the moment this module loads, so a test can read it
+// (as an empty array) before any sound has played.
+if (typeof window !== 'undefined' && !window.__palsySounds) window.__palsySounds = [];
+
 let ctx: AudioContext | null = null;
 
 function audioCtx(): AudioContext | null {
