@@ -4,9 +4,9 @@ import { useSoundsMuted } from '@/lib/sounds';
 
 // Little speaker button for game headers (rooms + DMs). Toggles the
 // per-device game-sounds mute; the Settings Alerts tab has the same
-// switch, and both stay in sync.
-export default function SoundToggle() {
-  const [muted, setMuted] = useSoundsMuted();
+// switch, and both stay in sync. userId keys the mute per user.
+export default function SoundToggle({ userId }: { userId?: string | null }) {
+  const [muted, setMuted] = useSoundsMuted(userId);
   return (
     <button type="button" onClick={() => setMuted(!muted)}
       title={muted ? 'Game sounds off — tap to turn on' : 'Game sounds on — tap to mute'}
