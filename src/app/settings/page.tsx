@@ -41,7 +41,7 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<'profile'|'appearance'|'notifications'|'account'>('profile');
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [notifSaved, setNotifSaved] = useState(false);
-  const [soundsMuted, setSoundsMuted] = useSoundsMuted();
+  const [soundsMuted, setSoundsMuted] = useSoundsMuted(profile?.id);
   const [notifPermission, setNotifPermission] = useState<string>('unsupported');
   const [isPrivate, setIsPrivate] = useState(false);
   const [privacySaved, setPrivacySaved] = useState(false);
