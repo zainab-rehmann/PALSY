@@ -96,6 +96,10 @@ export default function RoomPage() {
   const [copied, setCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Mirror of the loaded messages for realtime handlers, whose closures
+  // otherwise only see the first render's (empty) list.
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   // Chat scroll: the list must open at the NEWEST messages (bottom), on
   // first open, after reload, and whenever the list remounts (room tab
   // switch, DM games panel close). The old effect scrolled only when the
@@ -320,9 +324,17 @@ export default function RoomPage() {
       // on a message, refresh that message's chips without a reload.
       // (message_reactions has no room_id, so no filter — refreshReactions
       // is a no-op for messages not in this room.)
+      // DELETE events carry only the reaction id in old_record (even with
+      // REPLICA IDENTITY FULL, the realtime server sends just the PK), so
+      // resolve the message from the reactions currently loaded.
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, (payload) => {
         const mid = (payload.new as any)?.message_id || (payload.old as any)?.message_id;
-        if (mid) refreshReactions(mid);
+        if (mid) { refreshReactions(mid); return; }
+        const rid = (payload.old as any)?.id;
+        if (rid) {
+          const owner = messagesRef.current.find(m => (m.reactions || []).some(r => r.id === rid));
+          if (owner) refreshReactions(owner.id);
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
