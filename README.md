@@ -11,12 +11,12 @@
 - 👥 Friends system (search, add, remove) — display names are unique, one name one person
 - 🔒 Private accounts (bio hidden from strangers, requests need approval)
 - 🏠 Rooms (create, join by invite code, optional entry code, theme + picture changeable by any member)
-- 💬 Real-time messaging (private DMs + room chat, media + voice, read ticks, typing indicators, online / last-seen / in-chat presence)
+- 💬 Real-time messaging (private DMs + room chat, media + voice, read ticks, typing indicators, online / last-seen / in-chat presence, chats always open at your newest messages)
 - 🖼️ Chat wallpapers (10 presets + your own photo) and per-chat themes
 - 🔐 Optional chat locker — lock any DM or room behind a code, with private notifications
 - 😊 Full emoji picker (1,923 emojis) + 16 quick reactions in DMs and rooms
 - ↩️ Reply, pin and star messages; export / clear chat; select + bulk delete
-- 🎮 8 multiplayer games, in rooms and in DMs: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman, Draw & Guess, Trivia Duel (72-question bank), Dots & Boxes, Crazy Eights — with game sounds (mute in Settings or in any game)
+- 🎮 8 multiplayer games, in rooms and in DMs: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman, Draw & Guess, Trivia Duel (72-question bank), Dots & Boxes, Crazy Eights — with game sounds (mute is saved per person, in Settings or in any game)
 - 🔔 Notification bell + pop-ups (mute per room)
 - 📱 Fully responsive (mobile + desktop) and installable as an app (PWA)
 - 🌐 Ready for Vercel deployment
