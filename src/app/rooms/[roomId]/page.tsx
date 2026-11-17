@@ -21,7 +21,10 @@ import EntryCodePrompt from '@/components/EntryCodePrompt';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
 import { wallpaperStyle } from '@/lib/wallpapers';
 import LockerPrompt from '@/components/LockerPrompt';
+import SoundToggle from '@/components/SoundToggle';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
+
+const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
 
 const PRESETS: Record<string,{bg:string;accent:string;emoji:string}> = {
   'cloudy-blue':{bg:'#DCEBFF',accent:'#7CA8E8',emoji:'☁️'},
@@ -646,6 +649,37 @@ export default function RoomPage() {
     }
   }
 
+  // Message reactions in rooms — same behaviour as DMs: the hold menu
+  // offers the 16 quick reactions, chips under the message show the
+  // counts, and tapping a chip you added removes it again.
+  async function refreshReactions(msgId: string) {
+    const supabase = createClient();
+    const { data } = await supabase.from('message_reactions').select('*').eq('message_id', msgId);
+    setMessages(m=>m.map(x=>x.id===msgId ? { ...x, reactions: data||[] } : x));
+  }
+
+  // Tap a reaction chip you already added to remove it; otherwise add it.
+  async function toggleReaction(msgId: string, emoji: string) {
+    if (!profile) return;
+    const supabase = createClient();
+    const msg = messages.find(m => m.id === msgId);
+    const mine = msg?.reactions?.some((r: any) => r.user_id === profile.id && r.emoji === emoji);
+    if (mine) {
+      await supabase.from('message_reactions').delete().eq('message_id', msgId).eq('user_id', profile.id).eq('emoji', emoji);
+    } else {
+      await supabase.from('message_reactions').upsert({ message_id: msgId, user_id: profile.id, emoji });
+    }
+    await refreshReactions(msgId);
+  }
+
+  async function addReaction(msgId: string, emoji: string) {
+    if (!profile) return;
+    const supabase = createClient();
+    await supabase.from('message_reactions').upsert({ message_id: msgId, user_id: profile.id, emoji });
+    setActionMsg(null);
+    await refreshReactions(msgId);
+  }
+
   async function openStarred() {
     setShowChatMenu(false);
     if (!profile) return;
@@ -1082,7 +1116,10 @@ export default function RoomPage() {
                           <>
                           <div className="fixed inset-0 z-[5]" onClick={()=>setActionMsg(null)}/>
                           <div className={`absolute ${menuBelow?'top-full mt-1':'bottom-full mb-1'} ${mine?'right-0':'left-0'} flex flex-col gap-1 p-1.5 rounded-2xl z-20`} style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
-                            <div className="flex gap-1">
+                            <div className="flex gap-1" style={{flexWrap:'wrap',maxWidth:320}}>
+                              {EMOJI_LIST.map(e=><button key={e} onClick={()=>addReaction(msg.id,e)} className="text-lg hover:scale-125 transition-transform">{e}</button>)}
+                            </div>
+                            <div className="flex gap-1 pt-1" style={{borderTop:`1px solid ${accentColor}33`}}>
                               <button onClick={()=>startReply(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Reply size={12}/> Reply</button>
                               {(myRole==='owner'||myRole==='moderator') && (
                                 <button onClick={()=>togglePin(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:msg.is_pinned?accentColor:`${accentColor}22`,color:msg.is_pinned?'#fff':'var(--color-text)'}}><Pin size={12}/> {msg.is_pinned?'Unpin':'Pin'}</button>
@@ -1100,6 +1137,16 @@ export default function RoomPage() {
                           </>
                         )}
                       </div>
+                      {/* Reactions display — same as DMs: chips with counts, tap yours to remove it. */}
+                      {msg.reactions && msg.reactions.length>0 && (
+                        <div className="flex gap-1 flex-wrap">
+                          {Object.entries(msg.reactions.reduce((acc:Record<string,number>,r:any)=>({...acc,[r.emoji]:(acc[r.emoji]||0)+1}),{})).map(([emoji,count])=>(
+                            <button key={emoji} onClick={()=>toggleReaction(msg.id,emoji)} title={msg.reactions?.some((r:any)=>r.user_id===profile?.id&&r.emoji===emoji) ? 'Tap to remove your reaction' : 'Tap to react'} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs" style={{background:'var(--color-secondary)',border:'1px solid var(--color-border)'}}>
+                              {emoji} <span style={{color:'var(--color-text-muted)'}}>{count as number}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:accentColor}}/>}{starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{ticks === 'seen' ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-accent)'}}><CheckCheck size={15}/> Seen</span> : ticks === 'delivered' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span> : ticks === 'sent' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span> : null}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}</span>
                     </div>
                   </div>
@@ -1549,6 +1596,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         </button>
         <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':gameType==='draw-guess'?'Draw & Guess':gameType==='trivia'?'Trivia Duel':gameType==='dots-boxes'?'Dots & Boxes':gameType==='crazy-eights'?'Crazy Eights':'Hangman'}</span>
         <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{players.length} player{players.length===1?'':'s'} in</span>
+        <SoundToggle/>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
           style={{background:accentColor, opacity: bothIn ? 1 : 0.45}}>
