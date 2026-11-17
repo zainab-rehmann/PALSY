@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Theme } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
-import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell, Globe, ImagePlus, Check, KeyRound, Dices } from 'lucide-react';
+import { Settings, Palette, User, LogOut, Trash2, Eye, EyeOff, Lock, Bell, Globe, ImagePlus, Check, KeyRound, Dices, Volume2, VolumeX } from 'lucide-react';
 import { WALLPAPERS, wallpaperStyle, isCustomWallpaper } from '@/lib/wallpapers';
+import { useSoundsMuted } from '@/lib/sounds';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
 import { hasLockerCode, setLockerCode, removeLockerCode } from '@/lib/locker';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -40,6 +41,7 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<'profile'|'appearance'|'notifications'|'account'>('profile');
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [notifSaved, setNotifSaved] = useState(false);
+  const [soundsMuted, setSoundsMuted] = useSoundsMuted();
   const [notifPermission, setNotifPermission] = useState<string>('unsupported');
   const [isPrivate, setIsPrivate] = useState(false);
   const [privacySaved, setPrivacySaved] = useState(false);
@@ -428,7 +430,24 @@ export default function SettingsPage() {
                 </div>
                 <p className="text-xs pt-3" style={{color:'var(--color-text-muted)',borderTop:'1px solid var(--color-border)'}}>
                   Muted rooms never pop up and never add bell noise. You can mute or unmute a room in its Settings tab. The bell always keeps your latest notifications, even with pop-ups off.
-                </p>
+                  </p>
+                </div>
+              <div className="theme-card p-6 space-y-4">
+                <p className="font-bold theme-text flex items-center gap-2">{soundsMuted ? <VolumeX size={16} style={{color:'var(--color-accent)'}}/> : <Volume2 size={16} style={{color:'var(--color-accent)'}}/>}Game sounds</p>
+                <div className="flex items-center gap-3">
+                  <button type="button" role="switch" aria-checked={!soundsMuted} onClick={()=>setSoundsMuted(!soundsMuted)}
+                    className="relative flex-shrink-0 rounded-full transition-all"
+                    style={{width:52,height:30,background:!soundsMuted?'var(--color-accent)':'var(--color-border)'}}>
+                    <span className="absolute top-1 rounded-full bg-white transition-all" style={{width:22,height:22,left:!soundsMuted?27:3,boxShadow:'0 1px 4px rgba(0,0,0,0.25)'}}/>
+                  </button>
+                  <div>
+                    <p className="font-bold text-sm theme-text">{soundsMuted ? 'Game sounds off' : 'Game sounds on ♡'}</p>
+                    <p className="text-xs" style={{color:'var(--color-text-muted)'}}>
+                      {soundsMuted ? 'Games stay silent on this device.' : 'Little sounds in games — moves, correct guesses, wins. Only you hear them; nothing is shared with your friend.'}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs" style={{color:'var(--color-text-muted)'}}>You can also mute or unmute from the speaker button at the top of any game.</p>
               </div>
             </div>
           )}
