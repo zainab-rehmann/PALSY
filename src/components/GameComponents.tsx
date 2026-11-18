@@ -39,7 +39,7 @@ const WORDLE_WORDS: string[] = [
   'CHASE','CHEAP','CHECK','CHEER','CHESS','CHEST','CHIEF','CHILD','CHILL','CHINA',
   'CHIPS','CHOSE','CHUNK','CIVIC','CLAIM','CLASS','CLEAN','CLEAR','CLERK','CLICK',
   'CLIFF','CLIMB','CLOCK','CLOSE','CLOTH','CLOUD','CLUBS','COACH','COAST','COINS',
-  'COLOR','COMIC','COOKS','CORDS','COSTS','COUCH','COULD','COUNT','COVER','CRACK',
+  'COLOR','COMIC','COOKS','CORDS','COSTS','COUCH','COULD','COUNT','COVER','CRANE',
 ];
 
 // Standard Wordle feedback with correct duplicate handling: greens
