@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen, Gamepad2, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen, Gamepad2, RotateCcw, BarChart3 } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
@@ -15,7 +15,9 @@ import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSni
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LockerPrompt from '@/components/LockerPrompt';
-import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel } from '@/components/GameComponents';
+import { PollCard } from '@/components/PollCard';
+import { PollForm } from '@/components/PollForm';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 import SoundToggle from '@/components/SoundToggle';
 
@@ -30,6 +32,7 @@ export default function DMPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
+  const [showPoll, setShowPoll] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -179,7 +182,7 @@ export default function DMPage() {
       // (The old query loaded the OLDEST 100, so recent messages vanished
       // after reload in any long chat.)
       const { data: msgs } = await supabase.from('messages')
-        .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+        .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*),poll_votes:poll_votes(*)')
         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
@@ -236,6 +239,17 @@ export default function DMPage() {
           if (rid) {
             const owner = messagesRef.current.find(m => (m.reactions || []).some(r => r.id === rid));
             if (owner) refreshReactions(owner.id);
+          }
+        })
+        // Poll votes arrive live: when anyone votes (or removes a vote)
+        // on a poll, refresh that poll's counts without a reload.
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'poll_votes' }, (payload) => {
+          const mid = (payload.new as any)?.message_id || (payload.old as any)?.message_id;
+          if (mid) { refreshPollVotes(mid); return; }
+          const rid = (payload.old as any)?.id;
+          if (rid) {
+            const owner = messagesRef.current.find(m => (m.poll_votes || []).some(v => v.id === rid));
+            if (owner) refreshPollVotes(owner.id);
           }
         })
         .subscribe();
@@ -533,7 +547,7 @@ export default function DMPage() {
   async function fetchOlderPage(before: string): Promise<Message[]> {
     const supabase = createClient();
     const { data } = await supabase.from('messages')
-      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*),poll_votes:poll_votes(*)')
       .or(`and(sender_id.eq.${profile!.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile!.id})`)
       .eq('is_deleted', false)
       .lt('created_at', before)
@@ -648,6 +662,48 @@ async function addReaction(msgId: string, emoji: string) {
     await supabase.from('message_reactions').upsert({ message_id: msgId, user_id: profile!.id, emoji });
     setReactionMsg(null);
     await refreshReactions(msgId);
+  }
+
+  // Polls in DMs — one vote per user per poll (migration 025).
+  // Tap an option to vote or change your vote; tap your voted option
+  // again to take your vote back. Counts arrive live via the
+  // poll_votes realtime subscription; this refresh is the local echo.
+  async function refreshPollVotes(msgId: string) {
+    const supabase = createClient();
+    const { data } = await supabase.from('poll_votes').select('*').eq('message_id', msgId);
+    setMessages(m=>m.map(x=>x.id===msgId ? { ...x, poll_votes: data||[] } : x));
+  }
+
+  async function votePoll(msgId: string, optionIndex: number) {
+    if (!profile) return;
+    const supabase = createClient();
+    const msg = messagesRef.current.find(m => m.id === msgId);
+    const mine = msg?.poll_votes?.find(v => v.user_id === profile.id);
+    if (mine && mine.option_index === optionIndex) {
+      await supabase.from('poll_votes').delete().eq('id', mine.id);
+    } else {
+      await supabase.from('poll_votes').upsert(
+        { message_id: msgId, user_id: profile.id, option_index: optionIndex },
+        { onConflict: 'message_id,user_id' });
+    }
+    await refreshPollVotes(msgId);
+  }
+
+  async function createPoll(question: string, options: string[]) {
+    if (!profile) return;
+    setShowPoll(false);
+    const supabase = createClient();
+    const { data, error } = await supabase.from('messages').insert({
+      receiver_id: friendId, sender_id: profile.id, content: question, type: 'poll',
+      poll_data: { question, options }, reply_to_id: replyTo?.id ?? null,
+    }).select().single();
+    if (!error && data) {
+      setMessages(m=>[...m, { ...(data as Message), sender: profile, reactions: [], poll_votes: [] }]);
+      setReplyTo(null);
+      void notifyDM(supabase, profile, friendId, 'poll', question);
+    } else {
+      setSendError("Couldn't post that poll. Please try again.");
+    }
   }
 
   async function deleteMessage(msgId: string) {
@@ -937,7 +993,10 @@ async function addReaction(msgId: string, emoji: string) {
                       <FileText size={16} /> {msg.content || 'Download Attachment'}
                     </a>
                   )}
-                  {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.content}
+                  {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.type !== 'poll' && msg.content}
+                  {msg.type === 'poll' && (
+                    <PollCard poll={msg.poll_data} votes={msg.poll_votes || []} myId={profile?.id} accentColor={dmAccent} onVote={(i) => votePoll(msg.id, i)} />
+                  )}
                   {/* Reaction picker on hover */}
                   {reactionMsg===msg.id && (
                     <>
@@ -1076,6 +1135,18 @@ async function addReaction(msgId: string, emoji: string) {
           >
             <Smile size={18} />
           </button>
+
+          <button
+            type="button"
+            onClick={() => { setShowEmojis(false); setShowPoll(v=>!v); }}
+            className="p-3 rounded-full transition-all hover:scale-105"
+            style={{background: showPoll ? 'var(--color-accent)' : 'var(--color-secondary)', color: showPoll ? '#fff' : 'var(--color-accent)'}}
+            title="Ask a question (poll)"
+          >
+            <BarChart3 size={18} />
+          </button>
+
+          {showPoll && <PollForm accentColor={dmAccent} onCreate={createPoll} onCancel={()=>setShowPoll(false)} />}
 
           <div className="flex-1 relative">
             <textarea
@@ -1357,6 +1428,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
       {gameType === 'trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
     </div>
   );
 }
