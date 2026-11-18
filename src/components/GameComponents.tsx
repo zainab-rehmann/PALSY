@@ -27,6 +27,37 @@ const DRAW_WORDS: { w: string; hint: string }[] = [
 
 // Trivia Duel question bank: well-known, unambiguous facts only.
 // `answer` is the index of the correct option.
+// Wordle Duel — 100 common 5-letter words. The same list picks the
+// duel word AND validates guesses (a guess must be in the list).
+const WORDLE_WORDS: string[] = [
+  'APPLE','BEACH','BEARD','BEAST','BEGIN','BEING','BELLY','BENCH','BERRY','BIRTH',
+  'BLACK','BLADE','BLAME','BLANK','BLAST','BLEND','BLESS','BLIND','BLOCK','BLOOD',
+  'BOARD','BONUS','BOOKS','BOOST','BOOTH','BOUND','BRAIN','BRAND','BRAVE','BREAD',
+  'BREAK','BREED','BRICK','BRIDE','BRIEF','BRING','BROAD','BROKE','BROOK','BROOM',
+  'BROWN','BRUSH','BUDDY','BUILD','BUNCH','BURST','CAMEL','CANAL','CANDY','CANOE',
+  'CARDS','CARGO','CARRY','CATCH','CAUSE','CHAIR','CHALK','CHAMP','CHARM','CHART',
+  'CHASE','CHEAP','CHECK','CHEER','CHESS','CHEST','CHIEF','CHILD','CHILL','CHINA',
+  'CHIPS','CHOSE','CHUNK','CIVIC','CLAIM','CLASS','CLEAN','CLEAR','CLERK','CLICK',
+  'CLIFF','CLIMB','CLOCK','CLOSE','CLOTH','CLOUD','CLUBS','COACH','COAST','COINS',
+  'COLOR','COMIC','COOKS','CORDS','COSTS','COUCH','COULD','COUNT','COVER','CRACK',
+];
+
+// Standard Wordle feedback with correct duplicate handling: greens
+// first, then yellows only from the letters still unaccounted for.
+function wordleFeedback(guess: string, answer: string): ('correct' | 'present' | 'absent')[] {
+  const res: ('correct' | 'present' | 'absent')[] = Array(5).fill('absent');
+  const counts: Record<string, number> = {};
+  for (let i = 0; i < 5; i++) {
+    if (guess[i] === answer[i]) res[i] = 'correct';
+    else counts[answer[i]] = (counts[answer[i]] || 0) + 1;
+  }
+  for (let i = 0; i < 5; i++) {
+    if (res[i] === 'correct') continue;
+    if ((counts[guess[i]] || 0) > 0) { res[i] = 'present'; counts[guess[i]]--; }
+  }
+  return res;
+}
+
 const TRIVIA_BANK: { q: string; options: string[]; answer: number; cat: string }[] = [
   { q: 'Which planet is known as the Red Planet?', options: ['Venus', 'Mars', 'Jupiter', 'Saturn'], answer: 1, cat: 'Science' },
   { q: 'What is H2O commonly known as?', options: ['Salt', 'Oxygen', 'Water', 'Hydrogen'], answer: 2, cat: 'Science' },
@@ -184,6 +215,7 @@ export function initialStateFor(type: string, creatorId: string): any {
     while (ceRank(top) === '8') { deck.push(top); top = deck.shift()!; }
     return { phase: 'playing', deck, hands, discard: [top], currentSuit: ceSuit(top), turn: creatorId, winner: null };
   }
+  if (type === 'wordle') return { phase: 'playing', word: WORDLE_WORDS[Math.floor(Math.random() * WORDLE_WORDS.length)], guesses: {}, done: {}, winner: null };
   return {};
 }
 
@@ -197,6 +229,7 @@ export const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = 
   'trivia': { emoji:'🧠', name:'Trivia Duel', desc:'2 players' },
   'dots-boxes': { emoji:'🔲', name:'Dots & Boxes', desc:'2 players' },
   'crazy-eights': { emoji:'🃏', name:'Crazy Eights', desc:'2 players' },
+  'wordle': { emoji:'🟩', name:'Wordle Duel', desc:'2 players' },
 };
 
 export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
@@ -1523,6 +1556,151 @@ export function CrazyEights({ game, state, profile, accentColor, canPlay, player
 // Fresh state for a rematch: same rules as the room restart — Tic Tac
 // Toe keeps its X/O seats, Rock Paper Scissors bumps the round, every
 // other game restarts from its initial state.
+// Wordle Duel — both players get the SAME 5-letter word and guess it
+// on their own board (6 guesses each). Green = right letter, right
+// spot; yellow = in the word, wrong spot; grey = not in the word.
+// Fewest guesses wins; the same count, or neither solving, is a draw.
+// Guesses go through the wordle_guess RPC (migration 026) so two
+// near-simultaneous guesses both land — the same race Trivia 018
+// and RPS 022 fixed. The word lives in synced state but the UI hides
+// it until the duel ends (same honesty note as Hangman).
+export function WordleDuel({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+  const [current, setCurrent] = useState('');
+  const [note, setNote] = useState('');
+  const word: string = (state.word || '').toUpperCase();
+  const guesses: Record<string, string[]> = state.guesses || {};
+  const doneMap: Record<string, boolean> = state.done || {};
+  const finished = state.phase === 'finished';
+  const myGuesses: string[] = guesses[profile?.id] || [];
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const theirGuesses: string[] = otherId ? (guesses[otherId] || []) : [];
+  const myDone = !!doneMap[profile?.id];
+  const theirDone = otherId ? !!doneMap[otherId] : false;
+  const mySolved = myGuesses.length > 0 && myGuesses[myGuesses.length - 1] === word;
+  const theirSolved = theirGuesses.length > 0 && theirGuesses[theirGuesses.length - 1] === word;
+  useWinnerSound(state.winner, profile?.id);
+
+  // Keyboard colours from my own guesses (green beats yellow beats grey).
+  const keyState: Record<string, 'correct' | 'present' | 'absent'> = {};
+  for (const g of myGuesses) {
+    wordleFeedback(g, word).forEach((f, i) => {
+      const l = g[i];
+      if (f === 'correct') keyState[l] = 'correct';
+      else if (f === 'present' && keyState[l] !== 'correct') keyState[l] = 'present';
+      else if (!keyState[l]) keyState[l] = 'absent';
+    });
+  }
+
+  async function submitGuess() {
+    const g = current.toUpperCase();
+    if (!profile || !canPlay || myDone || finished) return;
+    if (g.length !== 5) { setNote('Type 5 letters first.'); return; }
+    if (!WORDLE_WORDS.includes(g)) { setNote('Not in the word list — try another word.'); return; }
+    if (myGuesses.includes(g)) { setNote('You already tried that word.'); return; }
+    setNote('');
+    playSound('pop');
+    const supabase = createClient();
+    const { data } = await supabase.rpc('wordle_guess', { p_game_id: game.id, p_guess: g });
+    if (data) {
+      if (g === word) playSound('correct');
+      setCurrent('');
+      onUpdate(data);
+    } else {
+      setNote("That guess didn't land — try again.");
+    }
+  }
+
+  function pressKey(k: string) {
+    if (myDone || finished || !canPlay) return;
+    setNote('');
+    if (k === '⌫') { setCurrent((c) => c.slice(0, -1)); return; }
+    if (k === '⏎') { void submitGuess(); return; }
+    if (current.length < 5) setCurrent((c) => c + k);
+  }
+
+  const rows = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
+  const tileBg = (f: 'correct' | 'present' | 'absent' | null) =>
+    f === 'correct' ? '#4CAF50' : f === 'present' ? '#D9A514' : f === 'absent' ? '#9CA3AF' : 'rgba(var(--color-overlay-rgb),0.8)';
+
+  return (
+    <div className="space-y-4 text-center">
+      {!canPlay ? (
+        <p className="text-sm font-bold theme-text">Waiting for the second player to join…</p>
+      ) : finished ? (
+        <div className="p-4 rounded-2xl" style={{ background: `${accentColor}22` }}>
+          <p className="font-black text-lg theme-text">
+            {state.winner === 'draw' ? "It's a draw! 🤝" : state.winner === profile?.id ? 'You win! 🎉' : 'Your friend wins! 🎉'}
+          </p>
+          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+            The word was <b style={{ color: 'var(--color-text)' }}>{word}</b>
+            {mySolved && ` — you solved it in ${myGuesses.length} ${myGuesses.length === 1 ? 'guess' : 'guesses'}`}
+            {!mySolved && theirSolved && ` — your friend solved it in ${theirGuesses.length} ${theirGuesses.length === 1 ? 'guess' : 'guesses'}`}
+            {!mySolved && !theirSolved && ' — nobody solved it'}
+          </p>
+          <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>Tap Restart above to play again with a new word.</p>
+        </div>
+      ) : (
+        <p className="text-sm font-bold theme-text">
+          {myDone ? 'You finished — waiting for your friend…' : 'Same word, 6 guesses each — fewer guesses wins!'}
+        </p>
+      )}
+      {/* Their progress — counts only, never their letters. */}
+      {canPlay && otherId && (
+        <p className="text-xs font-bold" style={{ color: 'var(--color-text-muted)' }}>
+          Your friend: {theirGuesses.length}/6 guesses
+          {theirSolved ? ` · solved it in ${theirGuesses.length}! 🎉` : theirDone ? ' · finished' : ' · still guessing…'}
+        </p>
+      )}
+      {/* My board */}
+      <div className="space-y-1.5 max-w-xs mx-auto">
+        {Array.from({ length: 6 }).map((_, ri) => {
+          const g = myGuesses[ri];
+          const isCurrent = ri === myGuesses.length && !myDone && !finished;
+          const fb = g ? wordleFeedback(g, word) : null;
+          return (
+            <div key={ri} className="flex gap-1.5 justify-center">
+              {Array.from({ length: 5 }).map((_, ci) => {
+                const letter = g ? g[ci] : isCurrent ? current[ci] || '' : '';
+                const f = fb ? fb[ci] : null;
+                return (
+                  <div key={ci} className="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-black"
+                    style={{ background: tileBg(f), color: f ? '#fff' : 'var(--color-text)', border: f ? 'none' : `2px solid ${accentColor}44` }}>
+                    {letter}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+      {note && <p className="text-xs font-bold" style={{ color: '#FF6B6B' }}>{note}</p>}
+      {/* Keyboard */}
+      {!myDone && !finished && canPlay && (
+        <div className="space-y-1.5">
+          {rows.map((row) => (
+            <div key={row} className="flex gap-1 justify-center">
+              {row.split('').map((l) => {
+                const ks = keyState[l];
+                return (
+                  <button key={l} onClick={() => pressKey(l)}
+                    className="w-8 h-11 rounded-lg text-sm font-black transition-all hover:scale-105"
+                    style={{ background: ks === 'correct' ? '#4CAF50' : ks === 'present' ? '#D9A514' : ks === 'absent' ? '#9CA3AF' : 'rgba(var(--color-overlay-rgb),0.8)', color: ks ? '#fff' : 'var(--color-text)', border: `1px solid ${accentColor}33` }}>
+                    {l}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+          <div className="flex gap-1 justify-center">
+            <button onClick={() => pressKey('⌫')} className="px-3 h-11 rounded-lg text-sm font-black transition-all hover:scale-105" style={{ background: 'rgba(var(--color-overlay-rgb),0.8)', color: 'var(--color-text)', border: `1px solid ${accentColor}33` }}>⌫</button>
+            <button onClick={() => pressKey('⏎')} disabled={current.length !== 5} className="px-4 h-11 rounded-lg text-sm font-black transition-all hover:scale-105" style={{ background: accentColor, color: '#fff', opacity: current.length !== 5 ? 0.5 : 1 }}>Enter ↵</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function restartStateFor(game: any, gameState: any): any {
   const fresh = initialStateFor(game.type, game.created_by);
   if (game.type === 'tictactoe' && gameState) {
