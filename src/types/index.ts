@@ -75,7 +75,10 @@ export interface Message {
   delivered_at: string | null;
   read_at: string | null;
   edited_at: string | null;
-  type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'voice';
+  type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'voice' | 'poll';
+  // Polls (migration 025): {question, options: string[]}.
+  poll_data?: { question: string; options: string[] } | null;
+  poll_votes?: PollVote[];
   is_deleted: boolean;
   reply_to: string | null;
   reply_to_id: string | null;
@@ -94,6 +97,16 @@ export interface MessageReaction {
   message_id: string;
   user_id: string;
   emoji: string;
+  created_at: string;
+}
+
+// One vote in a poll (migration 025): one row per (poll, voter);
+// changing a vote updates the row, tapping your vote again removes it.
+export interface PollVote {
+  id: string;
+  message_id: string;
+  user_id: string;
+  option_index: number;
   created_at: string;
 }
 
@@ -120,7 +133,7 @@ export interface Notification {
   created_at: string;
 }
 
-export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights';
+export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights' | 'wordle';
 export type GameStatus = 'waiting' | 'active' | 'finished';
 
 export interface Game {
