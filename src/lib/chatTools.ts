@@ -19,6 +19,8 @@ function exportLine(msg: Message, senderName: string): string {
     body = '[Voice message]';
   } else if (msg.type === 'file') {
     body = `[File: ${msg.content}]`;
+  } else if (msg.type === 'poll') {
+    body = `[Poll: ${msg.poll_data?.question || msg.content || ''}]`;
   } else {
     body = msg.content;
   }
@@ -35,6 +37,7 @@ export function quoteSnippet(msg: Message): string {
   if (msg.type === 'video') return '[Video]';
   if (msg.type === 'audio' || msg.type === 'voice') return '[Voice message]';
   if (msg.type === 'file') return `[File: ${msg.content}]`;
+  if (msg.type === 'poll') return `📊 Poll: ${msg.poll_data?.question || msg.content || ''}`;
   const one = msg.content.replace(/\s+/g, ' ').trim();
   return one.length > 80 ? one.slice(0, 80) + '…' : one;
 }
