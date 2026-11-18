@@ -7,10 +7,12 @@ import type { Profile, Room, RoomMember, Message, MessageReceipt, Game } from '@
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, CheckCheck, Hash, Lock, LockOpen,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3
 } from 'lucide-react';
 import Link from 'next/link';
-import { GAME_META, initialStateFor, dealCrazyEights, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, dealCrazyEights, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel } from '@/components/GameComponents';
+import { PollCard } from '@/components/PollCard';
+import { PollForm } from '@/components/PollForm';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
@@ -76,6 +78,7 @@ export default function RoomPage() {
   }, []);
   const [input, setInput] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
+  const [showPoll, setShowPoll] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [actionMsg, setActionMsg] = useState<string|null>(null);
   const [editing, setEditing] = useState<Message|null>(null);
@@ -241,7 +244,7 @@ export default function RoomPage() {
     }
 
     const { data: msgs } = await supabase.from('messages')
-      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*),poll_votes:poll_votes(*)')
       .eq('room_id', roomId).eq('is_deleted', false)
       .order('created_at', { ascending: false })
       .limit(CHAT_PAGE_SIZE);
@@ -334,6 +337,19 @@ export default function RoomPage() {
         if (rid) {
           const owner = messagesRef.current.find(m => (m.reactions || []).some(r => r.id === rid));
           if (owner) refreshReactions(owner.id);
+        }
+      })
+      // Poll votes arrive live: when anyone votes (or removes a vote)
+      // on a poll, refresh that poll's counts without a reload.
+      // (poll_votes has no room_id, so no filter — refreshPollVotes
+      // is a no-op for messages not in this room.)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'poll_votes' }, (payload) => {
+        const mid = (payload.new as any)?.message_id || (payload.old as any)?.message_id;
+        if (mid) { refreshPollVotes(mid); return; }
+        const rid = (payload.old as any)?.id;
+        if (rid) {
+          const owner = messagesRef.current.find(m => (m.poll_votes || []).some(v => v.id === rid));
+          if (owner) refreshPollVotes(owner.id);
         }
       })
       .subscribe();
@@ -517,7 +533,7 @@ export default function RoomPage() {
   async function fetchOlderPage(before: string): Promise<Message[]> {
     const supabase = createClient();
     const { data } = await supabase.from('messages')
-      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*)')
+      .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*),poll_votes:poll_votes(*)')
       .eq('room_id', roomId).eq('is_deleted', false)
       .lt('created_at', before)
       .order('created_at', { ascending: false })
@@ -698,6 +714,48 @@ export default function RoomPage() {
     await supabase.from('message_reactions').upsert({ message_id: msgId, user_id: profile.id, emoji });
     setActionMsg(null);
     await refreshReactions(msgId);
+  }
+
+  // Polls in rooms — one vote per user per poll (migration 025).
+  // Tap an option to vote or change your vote; tap your voted option
+  // again to take your vote back. Counts arrive live via the
+  // poll_votes realtime subscription; this refresh is the local echo.
+  async function refreshPollVotes(msgId: string) {
+    const supabase = createClient();
+    const { data } = await supabase.from('poll_votes').select('*').eq('message_id', msgId);
+    setMessages(m=>m.map(x=>x.id===msgId ? { ...x, poll_votes: data||[] } : x));
+  }
+
+  async function votePoll(msgId: string, optionIndex: number) {
+    if (!profile) return;
+    const supabase = createClient();
+    const msg = messagesRef.current.find(m => m.id === msgId);
+    const mine = msg?.poll_votes?.find(v => v.user_id === profile.id);
+    if (mine && mine.option_index === optionIndex) {
+      await supabase.from('poll_votes').delete().eq('id', mine.id);
+    } else {
+      await supabase.from('poll_votes').upsert(
+        { message_id: msgId, user_id: profile.id, option_index: optionIndex },
+        { onConflict: 'message_id,user_id' });
+    }
+    await refreshPollVotes(msgId);
+  }
+
+  async function createPoll(question: string, options: string[]) {
+    if (!profile || !room) return;
+    setShowPoll(false);
+    const supabase = createClient();
+    const { data, error } = await supabase.from('messages').insert({
+      room_id: roomId, sender_id: profile.id, content: question, type: 'poll',
+      poll_data: { question, options }, reply_to_id: replyTo?.id ?? null,
+    }).select().single();
+    if (!error && data) {
+      setMessages(m=>[...m, { ...(data as Message), sender: profile, reactions: [], poll_votes: [] }]);
+      setReplyTo(null);
+      void notifyRoom(supabase, profile, room, members, 'poll', question);
+    } else {
+      setSendError("Couldn't post that poll. Please try again.");
+    }
   }
 
   async function openStarred() {
@@ -1131,7 +1189,10 @@ export default function RoomPage() {
                             <FileText size={16} /> {msg.content || 'Download Attachment'}
                           </a>
                         )}
-                        {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.content}
+                        {msg.type !== 'audio' && msg.type !== 'image' && msg.type !== 'video' && msg.type !== 'poll' && msg.content}
+                        {msg.type === 'poll' && (
+                          <PollCard poll={msg.poll_data} votes={msg.poll_votes || []} myId={profile?.id} accentColor={accentColor} onVote={(i) => votePoll(msg.id, i)} />
+                        )}
                         {actionMsg===msg.id && (
                           <>
                           <div className="fixed inset-0 z-[5]" onClick={()=>setActionMsg(null)}/>
@@ -1147,7 +1208,7 @@ export default function RoomPage() {
                               <button onClick={()=>toggleStar(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Star size={12}/> {starredIds.has(msg.id)?'Unstar':'Star'}</button>
                               <button onClick={()=>setActionMsg(null)} className="text-xs p-1"><X size={12}/></button>
                             </div>
-                            {mine && (
+                            {mine && msg.type !== 'poll' && (
                               <div className="flex gap-1 pt-1" style={{borderTop:`1px solid ${accentColor}33`}}>
                                 <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
                                 <button onClick={()=>deleteRoomMessage(msg.id)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}><Trash2 size={12}/> Delete</button>
@@ -1212,6 +1273,10 @@ export default function RoomPage() {
               <button type="button" onClick={() => setShowEmojis(v=>!v)} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showEmojis ? accentColor : `${accentColor}22`, color: showEmojis ? 'white' : accentColor}} title="Add emoji">
                 <Smile size={18}/>
               </button>
+              <button type="button" onClick={() => { setShowEmojis(false); setShowPoll(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showPoll ? accentColor : `${accentColor}22`, color: showPoll ? 'white' : accentColor}} title="Ask a question (poll)">
+                <BarChart3 size={18}/>
+              </button>
+              {showPoll && <PollForm accentColor={accentColor} onCreate={createPoll} onCancel={()=>setShowPoll(false)} />}
               <textarea ref={inputRef} value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,100)+'px';}}
                 onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
                 placeholder="Say something nice... ♡" rows={1}
@@ -1637,6 +1702,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       {gameType==='trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
     </div>
   );
 }
