@@ -23,6 +23,7 @@ export function messagePreview(type: string, content: string | null): string {
   if (type === 'video') return '🎥 sent you a video';
   if (type === 'audio' || type === 'voice') return '🎤 sent you a voice message';
   if (type === 'file') return `📎 sent a file${content ? `: ${content}` : ''}`;
+  if (type === 'poll') return `📊 started a poll: ${(content || '').slice(0, 80)}`;
   return (content || '').slice(0, 90) || 'sent you a message ♡';
 }
 
@@ -119,6 +120,7 @@ export async function notifyGame(
       numberguess: 'Number Guess', rps: 'Rock Paper Scissors',
       'draw-guess': 'Draw & Guess', trivia: 'Trivia Duel',
       'dots-boxes': 'Dots & Boxes', 'crazy-eights': 'Crazy Eights',
+      wordle: 'Wordle Duel',
     };
     const gameName = label[gameType] || 'a game';
     for (const m of (members || [])) {
