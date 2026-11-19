@@ -29,6 +29,7 @@ export default function SettingsPage() {
   const [displayNameStatus, setDisplayNameStatus] = useState<''|'checking'|'available'|'taken'>('');
   const [displayNameMsg, setDisplayNameMsg] = useState('');
   const [bio, setBio] = useState('');
+  const [birthday, setBirthday] = useState(''); // 'YYYY-MM-DD' or '' (unset)
   const [theme, setTheme] = useState<Theme>('blue');
   const [wallpaper, setWallpaper] = useState<string>('default');
   const [uploadingWallpaper, setUploadingWallpaper] = useState(false);
@@ -65,6 +66,7 @@ export default function SettingsPage() {
       setDisplayName(prof.display_name||'');
       setUsername(prof.username||'');
       setBio(prof.bio||'');
+      setBirthday(prof.birthday||'');
       setTheme(prof.theme||'blue');
       setWallpaper(prof.wallpaper||'default');
       setNotifEnabled(prof.notifications_enabled !== false);
@@ -155,6 +157,7 @@ export default function SettingsPage() {
     const d = displayName.trim();
     const usernameChanged = u !== profile.username;
     const displayChanged = d !== (profile.display_name || '');
+    const birthdayChanged = (birthday || null) !== (profile.birthday || null);
     if (usernameChanged) {
       const err = usernameError(u);
       if (err) { setUsernameStatus('invalid'); setUsernameMsg(err); return; }
@@ -171,7 +174,7 @@ export default function SettingsPage() {
     }
     setSaving(true);
     const supabase = createClient();
-    const updates: Record<string, unknown> = { display_name: d, bio, theme, wallpaper, updated_at: new Date().toISOString() };
+    const updates: Record<string, unknown> = { display_name: d, bio, birthday: birthday || null, theme, wallpaper, updated_at: new Date().toISOString() };
     if (usernameChanged) updates.username = u;
     const { error } = await supabase.from('profiles').update(updates).eq('id', profile.id);
     if (error) {
@@ -189,8 +192,8 @@ export default function SettingsPage() {
       setSaving(false);
       return;
     }
-    if (usernameChanged || displayChanged) {
-      setProfile(p => p ? { ...p, ...(usernameChanged ? { username: u } : {}), ...(displayChanged ? { display_name: d } : {}) } : p);
+    if (usernameChanged || displayChanged || birthdayChanged) {
+      setProfile(p => p ? { ...p, ...(usernameChanged ? { username: u } : {}), ...(displayChanged ? { display_name: d } : {}), ...(birthdayChanged ? { birthday: birthday || null } : {}) } : p);
     }
     if (usernameChanged) { setUsernameStatus(''); setUsernameMsg('Username updated ✓'); }
     if (displayChanged) { setDisplayNameStatus(''); setDisplayNameMsg(d === '' ? '' : 'Name updated ✓'); }
@@ -327,6 +330,16 @@ export default function SettingsPage() {
               <div>
                 <label className="text-xs font-bold mb-1.5 block" style={{color:'var(--color-text-muted)'}}>Bio</label>
                 <textarea value={bio} onChange={e=>setBio(e.target.value)} rows={3} className="theme-input w-full py-3 px-4 text-sm resize-none" placeholder="Tell us about yourself... ♡"/>
+              </div>
+              <div>
+                <label className="text-xs font-bold mb-1.5 block" style={{color:'var(--color-text-muted)'}}>Birthday 🎂</label>
+                <div className="flex gap-2">
+                  <input type="date" value={birthday} onChange={e=>setBirthday(e.target.value)} className="theme-input flex-1 py-3 px-4 text-sm"/>
+                  {birthday && (
+                    <button type="button" onClick={()=>setBirthday('')} className="px-4 py-3 rounded-2xl text-xs font-bold flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)'}}>Clear</button>
+                  )}
+                </div>
+                <p className="text-xs mt-1.5" style={{color:'var(--color-text-muted)'}}>Optional — your friends will see a little cake on your birthday. Only the day and month show, never the year.</p>
               </div>
               <button onClick={saveProfile} disabled={saving} className="theme-btn w-full py-3 text-sm">{saved?'Saved! ♡':saving?'Saving...':'Save Changes'}</button>
             </div>
