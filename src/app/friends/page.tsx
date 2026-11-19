@@ -6,6 +6,7 @@ import type { Profile, Friendship, FriendRequest } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
 import { Search, UserPlus, Check, X, Users, MessageCircle, UserMinus } from 'lucide-react';
 import { isFreshOnline, presenceLabel } from '@/lib/presence';
+import { isBirthdayToday } from '@/lib/birthday';
 import Link from 'next/link';
 
 type Tab = 'friends' | 'search' | 'requests';
@@ -56,7 +57,7 @@ function FriendsContent() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, (payload) => {
         const upd = payload.new as Profile;
         // Refresh presence AND profile fields (privacy flips must show live).
-        const patchOne = (f: Profile) => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen, is_private: upd.is_private, bio: upd.bio, display_name: upd.display_name, username: upd.username, avatar_url: upd.avatar_url } : f;
+        const patchOne = (f: Profile) => f.id === upd.id ? { ...f, is_online: upd.is_online, last_seen: upd.last_seen, is_private: upd.is_private, bio: upd.bio, birthday: upd.birthday, display_name: upd.display_name, username: upd.username, avatar_url: upd.avatar_url } : f;
         setFriends(prev => prev.map(patchOne));
         setSearchResults(prev => prev.map(patchOne));
       })
@@ -70,12 +71,12 @@ function FriendsContent() {
   useEffect(() => {
     const supabase = createClient();
     const t = setInterval(async () => {
-      const { data } = await supabase.from('profiles').select('id,is_online,last_seen,is_private,bio,display_name,username,avatar_url').limit(100);
+      const { data } = await supabase.from('profiles').select('id,is_online,last_seen,is_private,bio,birthday,display_name,username,avatar_url').limit(100);
       if (!data) return;
       const byId = new Map(data.map(p => [p.id, p]));
       const patch = (list: Profile[]) => list.map(f => {
         const u = byId.get(f.id);
-        return u ? { ...f, is_online: u.is_online, last_seen: u.last_seen, is_private: u.is_private, bio: u.bio, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url } : f;
+        return u ? { ...f, is_online: u.is_online, last_seen: u.last_seen, is_private: u.is_private, bio: u.bio, birthday: u.birthday, display_name: u.display_name, username: u.username, avatar_url: u.avatar_url } : f;
       });
       setFriends(patch);
       setSearchResults(patch);
@@ -221,6 +222,17 @@ function FriendsContent() {
 
           {tab==='friends' && (
             <div>
+              {friends.filter(f => isBirthdayToday(f.birthday)).length > 0 && (
+                <div className="theme-card p-4 mb-3 flex items-center gap-3" style={{ background: '#FFE3EE', border: '2px solid #FF9EBB' }}>
+                  <span className="text-2xl">🎂</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-sm" style={{ color: '#D6336C' }}>Birthdays today!</p>
+                    <p className="text-xs font-bold" style={{ color: '#D6336C' }}>
+                      {friends.filter(f => isBirthdayToday(f.birthday)).map(f => f.display_name || f.username).join(', ')} — send them some love ♡
+                    </p>
+                  </div>
+                </div>
+              )}
               {friends.length===0 ? (
                 <EmptyState icon="👥" title="No friends yet" desc="No friends here yet. Let's find your people! ♡" action={<button onClick={()=>setTab('search')} className="theme-btn px-5 py-2.5 text-sm flex items-center gap-2"><UserPlus size={15}/>Find Friends</button>}/>
               ) : (
@@ -229,7 +241,7 @@ function FriendsContent() {
                     <div key={f.id} className="theme-card p-4 flex items-center gap-3">
                       <div className="relative"><Avatar profile={f} size={44}/><div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white" style={{background:isFreshOnline(f)?'#4ADE80':'#9CA3AF'}}/></div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-bold text-sm theme-text">{f.display_name||f.username}</p>
+                        <p className="font-bold text-sm theme-text">{f.display_name||f.username}{isBirthdayToday(f.birthday) && <span className="ml-1" title="Birthday today! 🎂">🎂</span>}</p>
                         <p className="text-xs" style={{color:'var(--color-text-muted)'}}>@{f.username} · {presenceLabel(f)}</p>
                       </div>
                       <div className="flex gap-2">
