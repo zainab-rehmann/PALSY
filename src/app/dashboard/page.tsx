@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room, FriendRequest, Notification } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
+import { isBirthdayToday } from '@/lib/birthday';
 import NotificationBell from '@/components/NotificationBell';
 import { PalsyLogo } from '@/components/branding/PalsyLogo';
 import {
@@ -18,6 +19,7 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile|null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
+  const [birthdayFriends, setBirthdayFriends] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -47,6 +49,9 @@ export default function DashboardPage() {
     const { data: reqs } = await supabase.from('friend_requests').select('*,sender:profiles!sender_id(*)').eq('receiver_id', user.id).eq('status', 'pending');
     setPendingRequests(reqs || []);
 
+    // Birthdays today: my friends whose birthday falls on today.
+    const { data: fships } = await supabase.from('friendships').select('*,friend:profiles!friend_id(*)').eq('user_id', user.id);
+    setBirthdayFriends(((fships || []).map(f => f.friend as Profile)).filter(f => isBirthdayToday(f.birthday)));
 
     setLoading(false);
   }, [router]);
@@ -114,6 +119,28 @@ export default function DashboardPage() {
               </Link>
             ))}
           </div>
+
+          {/* Birthdays today */}
+          {birthdayFriends.length > 0 && (
+            <div className="theme-card p-5" style={{ background: '#FFE3EE', border: '2px solid #FF9EBB' }}>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">🎂</span>
+                <h2 className="font-black text-sm" style={{ color: '#D6336C' }}>Birthdays today!</h2>
+              </div>
+              <div className="space-y-2">
+                {birthdayFriends.map(f => (
+                  <Link key={f.id} href={`/messages/${f.id}`} className="flex items-center gap-3 p-2 rounded-2xl transition-all hover:scale-[1.01]" style={{ background: 'rgba(255,255,255,0.7)' }}>
+                    <Avatar profile={f} size={36} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-sm theme-text">It&apos;s {f.display_name || f.username}&apos;s birthday! 🎂</p>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Tap to send them some love ♡</p>
+                    </div>
+                    <ChevronRight size={16} style={{ color: 'var(--color-text-muted)' }} />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Pending friend requests */}
           {pendingRequests.length > 0 && (
