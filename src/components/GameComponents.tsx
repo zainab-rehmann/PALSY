@@ -199,7 +199,125 @@ export function dealCrazyEights(st: any, userId: string): any {
   return { ...st, hands, deck };
 }
 
-export function initialStateFor(type: string, creatorId: string): any {
+// Checkers — 8x8, 12 pieces each. A board cell holds { side, king } or
+// null; side 0 sits at the bottom (rows 5-7) and moves up, side 1 sits
+// at the top (rows 0-2) and moves down. seats[0] is the creator
+// (bottom), seats[1] the joining player (top, null until they join —
+// joinGame fills it via seatCheckersPlayer). Pieces move one diagonal
+// step forward; jumps capture the jumped piece and are mandatory; a
+// jump that opens another jump from the landing square must continue
+// (mustJumpFrom). Reaching the far row crowns a king (kings move both
+// ways) and ends the turn. Win: the opponent has no pieces left or no
+// legal moves. Pure helpers — the verify script runs them in node.
+export interface CheckersMove { from: number; to: number; captured: number | null; }
+function ckRow(i: number): number { return Math.floor(i / 8); }
+function ckCol(i: number): number { return i % 8; }
+function ckIdx(r: number, c: number): number { return r * 8 + c; }
+function ckOnBoard(r: number, c: number): boolean { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+// Which side a player sits on: 0 = seats[0] (creator, bottom),
+// 1 = seats[1] (top). Null when the player is not seated (yet).
+export function checkersSideOf(state: any, playerId: string): 0 | 1 | null {
+  if (!state || !playerId) return null;
+  if (state.seats?.[0] === playerId) return 0;
+  if (state.seats?.[1] === playerId) return 1;
+  return null;
+}
+export function checkersLegalMoves(board: any[], side: 0 | 1, mustJumpFrom: number | null): CheckersMove[] {
+  const jumps: CheckersMove[] = [];
+  const steps: CheckersMove[] = [];
+  // Mid multi-jump: only the jumping piece may move, and only to jump.
+  const froms = mustJumpFrom !== null && mustJumpFrom !== undefined
+    ? [mustJumpFrom]
+    : board.map((cell, i) => (cell && cell.side === side ? i : -1)).filter((i) => i >= 0);
+  for (const from of froms) {
+    const cell = board[from];
+    if (!cell || cell.side !== side) continue;
+    const r = ckRow(from), c = ckCol(from);
+    const dirs = cell.king ? [-1, 1] : [side === 0 ? -1 : 1];
+    for (const dr of dirs) {
+      for (const dc of [-1, 1]) {
+        const r1 = r + dr, c1 = c + dc;
+        if (!ckOnBoard(r1, c1)) continue;
+        const adj = board[ckIdx(r1, c1)];
+        if (!adj) {
+          if (mustJumpFrom === null || mustJumpFrom === undefined) steps.push({ from, to: ckIdx(r1, c1), captured: null });
+        } else if (adj.side !== side) {
+          const r2 = r + 2 * dr, c2 = c + 2 * dc;
+          if (ckOnBoard(r2, c2) && !board[ckIdx(r2, c2)]) jumps.push({ from, to: ckIdx(r2, c2), captured: ckIdx(r1, c1) });
+        }
+      }
+    }
+  }
+  // Captures are mandatory: if any jump exists, plain steps are illegal.
+  return jumps.length > 0 ? jumps : steps;
+}
+export function checkersCountPieces(board: any[], side: 0 | 1): number {
+  return board.filter((cell) => cell && cell.side === side).length;
+}
+// Apply one legal move and return the new state, or null when the move
+// is illegal (wrong turn, not your piece, not a legal destination).
+// The mover's id comes from state.turn; seats map sides to players.
+export function applyCheckersMove(state: any, from: number, to: number): any | null {
+  if (!state || !state.board || !state.seats) return null;
+  const mover = state.turn;
+  const side = checkersSideOf(state, mover);
+  if (side === null) return null;
+  const legal = checkersLegalMoves(state.board, side, state.mustJumpFrom ?? null);
+  const move = legal.find((m) => m.from === from && m.to === to);
+  if (!move) return null;
+  const board = [...state.board];
+  const piece = { ...(board[from] as { side: 0 | 1; king: boolean }) };
+  board[from] = null;
+  if (move.captured !== null) board[move.captured] = null;
+  // Crowned on the far row — and a crowned piece's turn ends, even
+  // mid-jump (standard American checkers rule).
+  const crowned = !piece.king && ((side === 0 && ckRow(to) === 0) || (side === 1 && ckRow(to) === 7));
+  if (crowned) piece.king = true;
+  board[to] = piece;
+  const captured = { ...(state.captured || {}) };
+  if (move.captured !== null) captured[mover] = (captured[mover] || 0) + 1;
+  const next: any = { ...state, board, captured, lastMove: { from, to } };
+  const otherSide = (side === 0 ? 1 : 0) as 0 | 1;
+  const otherId = state.seats[otherSide];
+  // Multi-jump: the same piece jumps again while another capture is open.
+  if (move.captured !== null && !crowned) {
+    const again = checkersLegalMoves(board, side, to);
+    if (again.length > 0) {
+      next.mustJumpFrom = to;
+      return next; // turn stays with the mover
+    }
+  }
+  next.mustJumpFrom = null;
+  // Win: the opponent has no pieces left, or no legal move on their
+  // turn. (No second player seated yet means no win check — a game
+  // cannot be played before both are in anyway.)
+  if (otherId) {
+    const oppPieces = checkersCountPieces(board, otherSide);
+    const oppMoves = checkersLegalMoves(board, otherSide, null);
+    if (oppPieces === 0 || oppMoves.length === 0) {
+      next.phase = 'finished';
+      next.winner = mover;
+    } else {
+      next.turn = otherId;
+    }
+  }
+  return next;
+}
+export function checkersNewBoard(creatorId: string, otherId?: string | null): any {
+  const board: any[] = Array(64).fill(null);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 8; c++) if ((r + c) % 2 === 1) board[r * 8 + c] = { side: 1, king: false };
+  for (let r = 5; r < 8; r++) for (let c = 0; c < 8; c++) if ((r + c) % 2 === 1) board[r * 8 + c] = { side: 0, king: false };
+  return { phase: 'playing', board, seats: [creatorId, otherId || null], turn: creatorId, winner: null, captured: {}, mustJumpFrom: null, lastMove: null };
+}
+// Seat the joining player on the top rows (side 1). Never seats a
+// third player and never re-seats once filled.
+export function seatCheckersPlayer(st: any, userId: string): any {
+  const seats = [...(st.seats || [null, null])];
+  if (!seats[1] && seats[0] !== userId) seats[1] = userId;
+  return { ...st, seats };
+}
+
+export function initialStateFor(type: string, creatorId: string, otherId?: string | null): any {
   if (type === 'tictactoe') return { board: Array(9).fill(null), currentPlayer: creatorId, playerX: creatorId, playerO: null, winner: null };
   if (type === 'rps') return { choices: {}, winner: null, round: 1 };
   if (type === 'number-guess') return { phase: 'choose', setterId: null, guesserId: null, secret: null, guesses: [], winner: null };
@@ -216,6 +334,7 @@ export function initialStateFor(type: string, creatorId: string): any {
     return { phase: 'playing', deck, hands, discard: [top], currentSuit: ceSuit(top), turn: creatorId, winner: null };
   }
   if (type === 'wordle') return { phase: 'playing', word: WORDLE_WORDS[Math.floor(Math.random() * WORDLE_WORDS.length)], guesses: {}, done: {}, winner: null };
+  if (type === 'checkers') return checkersNewBoard(creatorId, otherId);
   return {};
 }
 
@@ -230,6 +349,7 @@ export const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = 
   'dots-boxes': { emoji:'🔲', name:'Dots & Boxes', desc:'2 players' },
   'crazy-eights': { emoji:'🃏', name:'Crazy Eights', desc:'2 players' },
   'wordle': { emoji:'🟩', name:'Wordle Duel', desc:'2 players' },
+  'checkers': { emoji:'🔴', name:'Checkers', desc:'2 players' },
 };
 
 export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
@@ -1701,6 +1821,124 @@ export function WordleDuel({ game, state, profile, accentColor, canPlay, players
   );
 }
 
+// Checkers — turn-based, so no RPC: moves go through the same direct
+// state update as Tic Tac Toe / Dots & Boxes, with the stateRef mirror
+// so the other player's writes never get wiped. Tap one of your pieces
+// to see where it can go, tap a highlighted square to move there.
+// Jumps are mandatory and chain while another capture is open.
+const CHECKERS_OPP = '#8D5A2B'; // warm brown opponent pieces (solid colour)
+export function Checkers({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const [selected, setSelected] = useState<number | null>(null);
+  const board: any[] = state.board || [];
+  const seats: (string | null)[] = state.seats || [null, null];
+  const mySide: 0 | 1 | null = seats[0] === profile?.id ? 0 : seats[1] === profile?.id ? 1 : null;
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || seats[mySide === 0 ? 1 : 0] || null;
+  const myTurn = state.turn === profile?.id;
+  const finished = state.phase === 'finished';
+  const myPieces = mySide === null ? 0 : checkersCountPieces(board, mySide);
+  const theirPieces = mySide === null ? 0 : checkersCountPieces(board, (mySide === 0 ? 1 : 0) as 0 | 1);
+  const myCaptured = (state.captured || {})[profile?.id] || 0;
+  const theirCaptured = otherId ? ((state.captured || {})[otherId] || 0) : 0;
+  const mustJumpFrom: number | null = state.mustJumpFrom ?? null;
+  const legal = !finished && canPlay && myTurn && mySide !== null ? checkersLegalMoves(board, mySide, mustJumpFrom) : [];
+  const selectedMoves = selected !== null ? legal.filter((m) => m.from === selected) : [];
+  const legalTargets = new Set(selectedMoves.map((m) => m.to));
+  useWinnerSound(state.winner, profile?.id);
+  useTurnSound(myTurn, canPlay && !finished);
+  // A capture gets the happy chime on both screens (a plain move pops).
+  const prevCaptured = useRef(myCaptured + theirCaptured);
+  useEffect(() => {
+    const total = myCaptured + theirCaptured;
+    if (total > prevCaptured.current) playSound('correct');
+    prevCaptured.current = total;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myCaptured, theirCaptured]);
+
+  async function saveState(newState: any, done: boolean) {
+    const supabase = createClient();
+    await supabase.from('games').update({ state: newState, status: done ? 'finished' : 'active', winner_id: done && newState.winner ? newState.winner : null }).eq('id', game.id);
+    onUpdate(newState);
+  }
+
+  async function tapCell(idx: number) {
+    if (!profile || !canPlay || finished || !myTurn || mySide === null) return;
+    const cell = board[idx];
+    // Tapping one of my pieces selects it — only pieces with a legal
+    // move, and mid multi-jump only the jumping piece.
+    if (cell && cell.side === mySide) {
+      if (mustJumpFrom !== null && idx !== mustJumpFrom) return;
+      if (!legal.some((m) => m.from === idx)) return;
+      playSound('pop');
+      setSelected(selected === idx ? null : idx);
+      return;
+    }
+    // Tapping a highlighted square moves the selected piece there.
+    if (selected !== null && legalTargets.has(idx)) {
+      const next = applyCheckersMove(stateRef.current, selected, idx);
+      if (!next) return;
+      playSound('pop');
+      setSelected(null);
+      await saveState(next, next.phase === 'finished');
+    }
+  }
+
+  const winnerText = !finished ? '' : state.winner === profile?.id ? 'You win! 🎉' : 'Your friend wins!';
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm flex-wrap">
+        <span className="px-3 py-1.5 rounded-full font-black" style={{ background: `${accentColor}22`, color: accentColor }}>You · {myPieces} pieces</span>
+        <span className="px-3 py-1.5 rounded-full font-black" style={{ background: `${CHECKERS_OPP}22`, color: CHECKERS_OPP }}>Friend · {theirPieces} pieces</span>
+        <span className="ml-auto text-xs font-bold" style={{ color: 'var(--color-text-muted)' }}>Captured — You {myCaptured} · Them {theirCaptured}</span>
+      </div>
+      {!finished && (
+        <p className="text-center font-black theme-text">
+          {canPlay ? (myTurn ? (mustJumpFrom !== null ? 'Jump again — you must keep capturing! ♡' : 'Your turn — tap one of your pieces ♡') : "Friend's turn…") : 'Waiting for your friend to join…'}
+        </p>
+      )}
+      <div className="w-full max-w-sm mx-auto rounded-2xl p-2" style={{ background: '#F5E6D3' }}>
+        <div className="grid grid-cols-8 w-full">
+          {board.map((cell: any, i: number) => {
+            const r = Math.floor(i / 8), c = i % 8;
+            const dark = (r + c) % 2 === 1;
+            const isSelected = selected === i;
+            const targetMove = selectedMoves.find((m) => m.to === i);
+            const isMovable = legal.some((m) => m.from === i);
+            return (
+              <button key={i} onClick={() => tapCell(i)} disabled={!canPlay || finished}
+                className="aspect-square flex items-center justify-center"
+                style={{ background: dark ? '#E8C39A' : '#FFF8EE' }}>
+                {cell ? (
+                  <span className="w-[78%] h-[78%] rounded-full flex items-center justify-center text-white text-lg font-black"
+                    style={{ background: cell.side === mySide ? accentColor : CHECKERS_OPP, outline: isSelected ? `3px solid ${accentColor}` : isMovable && myTurn && canPlay ? '2px solid rgba(0,0,0,0.25)' : 'none' }}>
+                    {cell.king ? '♛' : ''}
+                  </span>
+                ) : targetMove ? (
+                  <span className="w-[38%] h-[38%] rounded-full" style={{ background: targetMove.captured !== null ? '#FF6B6B' : accentColor, opacity: 0.85 }} />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {finished && (
+        <div className="text-center space-y-2">
+          <p className="text-xl font-black theme-text">{winnerText}</p>
+          <p className="text-sm font-bold" style={{ color: 'var(--color-text-muted)' }}>Final pieces — You: {myPieces} · Friend: {theirPieces}</p>
+          <p className="text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>Tap Restart above for a rematch ♡</p>
+        </div>
+      )}
+      {!finished && (
+        <p className="text-xs text-center font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+          Move diagonally one square forward — or jump over your friend&apos;s piece to capture it. Jumps are mandatory, and a jump that opens another jump must continue. Reach the far row to be crowned king!
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function restartStateFor(game: any, gameState: any): any {
   const fresh = initialStateFor(game.type, game.created_by);
   if (game.type === 'tictactoe' && gameState) {
@@ -1709,6 +1947,11 @@ export function restartStateFor(game: any, gameState: any): any {
     fresh.currentPlayer = fresh.playerX;
   }
   if (game.type === 'rps' && gameState) fresh.round = (gameState.round || 1) + 1;
+  if (game.type === 'checkers' && gameState) {
+    // Re-seat the second player from the old game, so a rematch keeps
+    // both seats; the board itself is a fresh deal.
+    return initialStateFor(game.type, game.created_by, gameState.seats?.[1] || undefined);
+  }
   if (game.type === 'crazy-eights' && gameState) {
     // Re-deal the second player from the fresh deck, as the room restart does.
     const prevHands = (gameState.hands || {}) as Record<string, string[]>;
