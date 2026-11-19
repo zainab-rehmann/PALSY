@@ -10,12 +10,13 @@ import {
   Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3
 } from 'lucide-react';
 import Link from 'next/link';
-import { GAME_META, initialStateFor, dealCrazyEights, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers } from '@/components/GameComponents';
 import { PollCard } from '@/components/PollCard';
 import { PollForm } from '@/components/PollForm';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
+import { isBirthdayToday } from '@/lib/birthday';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
 import { notifyRoom, notifyGame } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -1299,6 +1300,7 @@ export default function RoomPage() {
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-sm theme-text flex items-center gap-1.5">
                       {mp?.display_name||mp?.username}
+                      {isBirthdayToday(mp?.birthday) && <span title="Birthday today! 🎂">🎂</span>}
                       {m.role==='owner'&&<Crown size={12} style={{color:'#FFD97D'}}/>}
                       {m.role==='moderator'&&<Shield size={12} style={{color:accentColor}}/>}
                     </p>
@@ -1608,6 +1610,10 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       // Deal the joining player their 7 cards from the deck.
       st = dealCrazyEights(st, profile.id);
     }
+    if (g.type === 'checkers') {
+      // Seat the joining player on the top rows (side 1).
+      st = seatCheckersPlayer(st, profile.id);
+    }
     // Touch the game row so every open screen refreshes its player list
     // and the waiting banner lifts the moment the second player joins.
     const { data } = await supabase.from('games').update({ state: st, status: count >= 2 ? 'active' : 'waiting' }).eq('id', g.id).select().single();
@@ -1627,6 +1633,11 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       fresh.currentPlayer = fresh.playerX;
     }
     if (game.type === 'rps') fresh.round = (gameState.round || 1) + 1;
+    if (game.type === 'checkers') {
+      // Re-seat the second player from the old game, so a rematch keeps
+      // both seats; the board itself is a fresh deal.
+      fresh.seats = [game.created_by, gameState.seats?.[1] || null];
+    }
     if (game.type === 'crazy-eights') {
       // Re-deal the second player from the fresh deck.
       const prevHands = (gameState.hands || {}) as Record<string, string[]>;
@@ -1679,7 +1690,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         <button onClick={closeGame} className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
           <ArrowLeft size={16} style={{color:accentColor}}/>
         </button>
-        <span className="font-black theme-text">{gameType==='tictactoe'?'Tic Tac Toe':gameType==='rps'?'Rock Paper Scissors':gameType==='number-guess'?'Number Guess':gameType==='draw-guess'?'Draw & Guess':gameType==='trivia'?'Trivia Duel':gameType==='dots-boxes'?'Dots & Boxes':gameType==='crazy-eights'?'Crazy Eights':'Hangman'}</span>
+        <span className="font-black theme-text">{GAME_META[gameType]?.name || 'A game'}</span>
         <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{players.length} player{players.length===1?'':'s'} in</span>
         <SoundToggle userId={profile?.id}/>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
@@ -1703,6 +1714,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       {gameType==='dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
     </div>
   );
 }
