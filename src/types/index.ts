@@ -6,6 +6,7 @@ export interface Profile {
   username: string;
   display_name: string;
   bio: string | null;
+  birthday: string | null; // migration 027: 'YYYY-MM-DD' or null
   avatar_url: string | null;
   theme: Theme;
   wallpaper: string | null;
@@ -133,7 +134,7 @@ export interface Notification {
   created_at: string;
 }
 
-export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights' | 'wordle';
+export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights' | 'wordle' | 'checkers';
 export type GameStatus = 'waiting' | 'active' | 'finished';
 
 export interface Game {
