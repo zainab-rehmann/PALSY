@@ -10,12 +10,13 @@ import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
+import { isBirthdayToday } from '@/lib/birthday';
 import { wallpaperStyle } from '@/lib/wallpapers';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LockerPrompt from '@/components/LockerPrompt';
-import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers } from '@/components/GameComponents';
 import { PollCard } from '@/components/PollCard';
 import { PollForm } from '@/components/PollForm';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
@@ -851,7 +852,7 @@ async function addReaction(msgId: string, emoji: string) {
           <>
             <div className="relative"><Avatar profile={friend} size={38}/><div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{background:isFreshOnline(friend)?'#4ADE80':'#9CA3AF'}}/></div>
             <div className="flex-1 min-w-0">
-              <p className="font-black text-sm theme-text">{friend.display_name||friend.username}</p>
+              <p className="font-black text-sm theme-text">{friend.display_name||friend.username}{isBirthdayToday(friend.birthday) && <span className="ml-1" title="Birthday today! 🎂">🎂</span>}</p>
               <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{friendTyping ? 'typing…' : friendInChat ? 'In this chat 💬' : isFreshOnline(friend) ? '🟢 Online' : presenceLabel(friend)}</p>
             </div>
           </>
@@ -876,6 +877,15 @@ async function addReaction(msgId: string, emoji: string) {
           )}
         </div>
       </header>
+      )}
+      {friend && isBirthdayToday(friend.birthday) && (
+        <div className="flex-shrink-0 px-4 pt-3">
+          <div className="relative overflow-hidden rounded-2xl px-4 py-3 text-center" style={{ background: '#FFE3EE', border: '2px solid #FF9EBB' }}>
+            <BirthdayConfetti />
+            <p className="relative font-black text-sm" style={{ color: '#D6336C' }}>🎂 It&apos;s {friend.display_name || friend.username}&apos;s birthday today! ♡</p>
+            <p className="relative text-xs font-bold mt-0.5" style={{ color: '#D6336C' }}>Send them some love — it&apos;s their day!</p>
+          </div>
+        </div>
       )}
       {sendError && (
         <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,107,107,0.12)',color:'#FF6B6B'}}>{sendError} <button onClick={()=>setSendError('')} className="underline ml-1">Dismiss</button></div>
@@ -1223,6 +1233,28 @@ async function addReaction(msgId: string, emoji: string) {
 // The two participants ARE the players: there is no join ceremony. The
 // friend joins automatically the moment they open the panel; until then
 // the game waits (timed games never run without both players present).
+// Birthday confetti: small solid-colour rectangles falling once across
+// the birthday banner. Pure CSS, no blur/glow, no library — the pieces
+// sit behind the banner text, fall once, then fade out and stay gone.
+const CONFETTI_COLORS = ['#FF6B9D', '#FFC94D', '#7FB069', '#6C8CFF', '#FF9E7D', '#B388FF'];
+function BirthdayConfetti() {
+  const pieces = Array.from({ length: 16 }, (_, i) => ({
+    left: (i * 61) % 100,
+    delay: (i % 8) * 0.35,
+    dur: 2.6 + (i % 5) * 0.5,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+  }));
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+      <style>{`@keyframes palsy-confetti-fall{0%{transform:translateY(-14px) rotate(0deg);opacity:0}15%{opacity:1}100%{transform:translateY(64px) rotate(360deg);opacity:0}}`}</style>
+      {pieces.map((p, i) => (
+        <span key={i} className="absolute top-0 block rounded-[2px]"
+          style={{ left: `${p.left}%`, width: 7, height: 11, background: p.color, animation: `palsy-confetti-fall ${p.dur}s ease-in ${p.delay}s 1 both` }} />
+      ))}
+    </div>
+  );
+}
+
 function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, onClose }: { dmKey: string; profile: Profile; friendName: string; accentColor: string; initialGameId: string | null; onClose: () => void }) {
   const [gameType, setGameType] = useState<string | null>(null);
   const [game, setGame] = useState<Game | null>(null);
@@ -1313,6 +1345,10 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
     if (g.type === 'crazy-eights') {
       // Deal the joining player their 7 cards from the deck.
       st = dealCrazyEights(st, profile.id);
+    }
+    if (g.type === 'checkers') {
+      // Seat the joining player on the top rows (side 1).
+      st = seatCheckersPlayer(st, profile.id);
     }
     // Touch the game row so every open screen refreshes its player list
     // and the waiting banner lifts the moment the second player is in.
@@ -1405,7 +1441,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
         <button onClick={closeGame} className="p-2 rounded-xl" style={{ background: 'rgba(var(--color-overlay-rgb),0.7)' }}>
           <ArrowLeft size={16} style={{ color: accentColor }} />
         </button>
-        <span className="font-black theme-text">{gameType === 'tictactoe' ? 'Tic Tac Toe' : gameType === 'rps' ? 'Rock Paper Scissors' : gameType === 'number-guess' ? 'Number Guess' : gameType === 'draw-guess' ? 'Draw & Guess' : gameType === 'trivia' ? 'Trivia Duel' : gameType === 'dots-boxes' ? 'Dots & Boxes' : gameType === 'crazy-eights' ? 'Crazy Eights' : 'Hangman'}</span>
+        <span className="font-black theme-text">{GAME_META[gameType]?.name || 'A game'}</span>
         <span className="text-xs ml-auto" style={{ color: 'var(--color-text-muted)' }}>{players.length} player{players.length === 1 ? '' : 's'} in</span>
         <SoundToggle userId={profile?.id}/>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
@@ -1429,6 +1465,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
       {gameType === 'dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
     </div>
   );
 }
