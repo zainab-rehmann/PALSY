@@ -16,7 +16,8 @@ import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSni
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LockerPrompt from '@/components/LockerPrompt';
-import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel } from '@/components/GameComponents';
+import MediaGallery, { type GalleryItem } from '@/components/MediaGallery';
 import { PollCard } from '@/components/PollCard';
 import { PollForm } from '@/components/PollForm';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
@@ -148,6 +149,12 @@ export default function DMPage() {
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [showStarred, setShowStarred] = useState(false);
   const [starredMessages, setStarredMessages] = useState<Message[]>([]);
+  // Shared media gallery: photos + videos in THIS chat only. The query
+  // runs only from the unlocked chat view (a locked chat returns the
+  // code prompt before this UI mounts), and is filtered to the DM pair.
+  const [showGallery, setShowGallery] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
   const [highlightId, setHighlightId] = useState<string|null>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [jumpNote, setJumpNote] = useState('');
@@ -767,6 +774,28 @@ async function addReaction(msgId: string, emoji: string) {
     }
   }
 
+  // Shared media gallery: every photo/video in THIS DM only — newest
+  // first, images + videos with a media_url, deleted messages excluded.
+  // Filtered to the DM pair, never a broad message read.
+  async function openGallery() {
+    setShowChatMenu(false);
+    if (!profile || gated) return;
+    setShowGallery(true);
+    setGalleryLoading(true);
+    const supabase = createClient();
+    const { data } = await supabase.from('messages')
+      .select('id,media_url,type,created_at,sender_id')
+      .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
+      .in('type', ['image', 'video']).not('media_url', 'is', null).eq('is_deleted', false)
+      .order('created_at', { ascending: false }).limit(200);
+    const items = ((data || []) as GalleryItem[]).map((m) => ({
+      ...m,
+      sender_name: m.sender_id === profile.id ? 'You' : (friend?.display_name || friend?.username || 'Friend'),
+    }));
+    setGalleryItems(items);
+    setGalleryLoading(false);
+  }
+
   async function openStarred() {
     setShowChatMenu(false);
     if (!profile) return;
@@ -868,6 +897,7 @@ async function addReaction(msgId: string, emoji: string) {
               <div className="fixed inset-0 z-30" onClick={()=>setShowChatMenu(false)}/>
               <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl p-2 z-40 space-y-1" style={{background:'var(--color-surface)',border:'1px solid var(--color-border)',boxShadow:'0 8px 30px rgba(0,0,0,0.12)'}}>
                 <button onClick={exportChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:'var(--color-accent)'}}/> Export chat</button>
+                <button onClick={openGallery} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ImageIcon size={16} style={{color:'var(--color-accent)'}}/> Media gallery</button>
                 <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:'var(--color-accent)'}}/> Starred messages</button>
                 <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:'var(--color-accent)'}}/> Select messages</button>
                 <button onClick={toggleLock} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}>{isLocked?<LockOpen size={16} style={{color:'var(--color-accent)'}}/>:<Lock size={16} style={{color:'var(--color-accent)'}}/>} {isLocked?'Unlock chat':'Lock chat'}</button>
@@ -1221,6 +1251,15 @@ async function addReaction(msgId: string, emoji: string) {
           </div>
         </>
       )}
+      {showGallery && (
+        <MediaGallery
+          items={galleryItems}
+          title={`Photos & videos with ${friend?.display_name || friend?.username || 'Friend'}`}
+          accentColor={dmAccent}
+          loading={galleryLoading}
+          onClose={() => setShowGallery(false)}
+        />
+      )}
       <style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style>
     </div>
   );
@@ -1466,6 +1505,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
       {gameType === 'crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'categories' && game && <CategoriesDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
     </div>
   );
 }
