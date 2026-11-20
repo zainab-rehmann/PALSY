@@ -134,7 +134,7 @@ export interface Notification {
   created_at: string;
 }
 
-export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights' | 'wordle' | 'checkers';
+export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights' | 'wordle' | 'checkers' | 'categories';
 export type GameStatus = 'waiting' | 'active' | 'finished';
 
 export interface Game {
