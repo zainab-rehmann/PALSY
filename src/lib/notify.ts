@@ -120,7 +120,7 @@ export async function notifyGame(
       numberguess: 'Number Guess', rps: 'Rock Paper Scissors',
       'draw-guess': 'Draw & Guess', trivia: 'Trivia Duel',
       'dots-boxes': 'Dots & Boxes', 'crazy-eights': 'Crazy Eights',
-      wordle: 'Wordle Duel', checkers: 'Checkers',
+      wordle: 'Wordle Duel', checkers: 'Checkers', categories: 'Categories',
     };
     const gameName = label[gameType] || 'a game';
     for (const m of (members || [])) {
