@@ -12,13 +12,14 @@
 - 🔒 Private accounts (bio hidden from strangers, requests need approval)
 - 🏠 Rooms (create, join by invite code, optional entry code, theme + picture changeable by any member)
 - 💬 Real-time messaging (private DMs + room chat, media + voice, read ticks, typing indicators, online / last-seen / in-chat presence, chats always open at your newest messages)
+- 🖼️ Shared media gallery — every photo and video in a DM or room, in one grid (tap ⋯ → Media gallery), newest first
 - 🖼️ Chat wallpapers (10 presets + your own photo) and per-chat themes
 - 🔐 Optional chat locker — lock any DM or room behind a code, with private notifications
 - 🎂 Birthday magic — set your birthday in Settings and your friends see a cake badge + confetti banner on your day (Dashboard, Friends and DMs)
 - 😊 Full emoji picker (1,923 emojis) + 16 quick reactions in DMs and rooms (reactions arrive live)
 - 📊 Polls in DMs and rooms — ask a question, everyone votes, results update live
 - ↩️ Reply, pin and star messages; export / clear chat; select + bulk delete
-- 🎮 10 multiplayer games, in rooms and in DMs: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman, Draw & Guess, Trivia Duel (72-question bank), Dots & Boxes, Crazy Eights, Wordle Duel, Checkers — with game sounds (mute is saved per person, in Settings or in any game)
+- 🎮 11 multiplayer games, in rooms and in DMs: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman, Draw & Guess, Trivia Duel (72-question bank), Dots & Boxes, Crazy Eights, Wordle Duel, Checkers, Categories — with game sounds (mute is saved per person, in Settings or in any game)
 - 🔔 Notification bell + pop-ups (mute per room)
 - 📱 Fully responsive (mobile + desktop) and installable as an app (PWA)
 - 🌐 Ready for Vercel deployment
@@ -37,7 +38,7 @@ npm install
 ### 2. Set up Supabase
 1. Create a project at [supabase.com](https://supabase.com)
 2. Go to your project → SQL Editor
-3. Run the migrations in order: `supabase/migrations/001_initial.sql`, then `002`–`027`
+3. Run the migrations in order: `supabase/migrations/001_initial.sql`, then `002`–`028`
 4. Set up a Storage bucket named `media` (public)
 
 ### 3. Configure environment variables
@@ -77,7 +78,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## 🗄️ Database
 
-Run the migrations in `supabase/migrations/` in order in your Supabase SQL Editor (001, then 002–027). The full consolidated schema is also kept at `supabase/palsy-supabase-schema-2026-11-10.sql` for reference.
+Run the migrations in `supabase/migrations/` in order in your Supabase SQL Editor (001, then 002–028). The full consolidated schema is also kept at `supabase/palsy-supabase-schema-2026-11-10.sql` for reference.
 
 Tables: `profiles`, `friend_requests`, `friendships`, `rooms`, `room_members`, `messages`, `message_reactions`, `poll_votes`, `notifications`, `games`, `game_players`, `message_receipts`, `room_entry_codes`, `locker_codes`, `locked_chats`
 
