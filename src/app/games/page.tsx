@@ -48,6 +48,7 @@ export default function GamesPage() {
     { id: 'crazy-eights', emoji: '🃏', name: 'Crazy Eights', desc: 'Match the suit or the rank — 8s are wild! First to empty your hand wins!', players: '2 players' },
     { id: 'wordle', emoji: '🟩', name: 'Wordle Duel', desc: 'Same word, six guesses each — fewer guesses wins!', players: '2 players' },
     { id: 'checkers', emoji: '🔴', name: 'Checkers', desc: 'Jump, capture, crown — first to take all the pieces wins!', players: '2 players' },
+    { id: 'categories', emoji: '🔤', name: 'Categories', desc: 'One letter, five categories — most valid answers in 60 seconds wins!', players: '2 players' },
   ];
 
   if (loading) return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0, 1, 2].map(i => <div key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--color-accent)', animation: 'float 1s ease-in-out infinite', animationDelay: `${i * 0.2}s` }} />)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
