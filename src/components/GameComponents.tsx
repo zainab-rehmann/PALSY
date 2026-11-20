@@ -317,6 +317,42 @@ export function seatCheckersPlayer(st: any, userId: string): any {
   return { ...st, seats };
 }
 
+// Categories — one letter, five categories, 60 seconds. Each player
+// types one answer per category; an answer scores only when its first
+// letter matches the game letter (case-insensitive). No dictionary:
+// any word starting with the letter counts. Most valid answers wins;
+// a tie is a draw. Letters Q, X and Z are excluded — answers must be
+// findable. Pure helpers — the verify script runs them in node, like
+// the checkers helpers.
+export const CATEGORIES_DURATION_MS = 60000;
+export const CATEGORIES_LETTERS: string[] = 'ABCDEFGHIJKLMNOPRSTUVWY'.split('');
+export const CATEGORIES_BANK: string[] = [
+  'Animal', 'Food', 'Country', 'Movie', 'Name', 'Colour',
+  'Sport', 'Job', 'Fruit', 'City', 'Song', 'Book',
+];
+// Draw the game: one random letter + 5 random categories from the bank.
+export function categoriesPick(): { letter: string; categories: string[] } {
+  const letter = CATEGORIES_LETTERS[Math.floor(Math.random() * CATEGORIES_LETTERS.length)];
+  return { letter, categories: shuffled(CATEGORIES_BANK).slice(0, 5) };
+}
+// One answer is valid when it is non-empty and starts with the letter.
+export function categoriesValidAnswer(answer: string, letter: string): boolean {
+  const a = (answer || '').trim();
+  if (!a || !letter) return false;
+  return a[0].toUpperCase() === letter.toUpperCase();
+}
+// Score a player's answers ({ category: answer }) against the letter.
+export function categoriesScore(answers: Record<string, string>, letter: string): number {
+  if (!answers || !letter) return 0;
+  return Object.values(answers).filter((a) => categoriesValidAnswer(a, letter)).length;
+}
+// Count how many categories a player has answered (non-empty), for the
+// opponent-progress line — counts only, never their answers.
+export function categoriesAnsweredCount(answers: Record<string, string>): number {
+  if (!answers) return 0;
+  return Object.values(answers).filter((a) => (a || '').trim() !== '').length;
+}
+
 export function initialStateFor(type: string, creatorId: string, otherId?: string | null): any {
   if (type === 'tictactoe') return { board: Array(9).fill(null), currentPlayer: creatorId, playerX: creatorId, playerO: null, winner: null };
   if (type === 'rps') return { choices: {}, winner: null, round: 1 };
@@ -335,6 +371,13 @@ export function initialStateFor(type: string, creatorId: string, otherId?: strin
   }
   if (type === 'wordle') return { phase: 'playing', word: WORDLE_WORDS[Math.floor(Math.random() * WORDLE_WORDS.length)], guesses: {}, done: {}, winner: null };
   if (type === 'checkers') return checkersNewBoard(creatorId, otherId);
+  if (type === 'categories') {
+    const pick = categoriesPick();
+    // endsAt is null until BOTH players are in — either client arms the
+    // 60s timer then (same arm pattern as Trivia's questionEndsAt), so
+    // the clock never runs while the second player is still joining.
+    return { phase: 'playing', letter: pick.letter, categories: pick.categories, answers: {}, done: {}, scores: {}, endsAt: null, winner: null };
+  }
   return {};
 }
 
@@ -350,6 +393,7 @@ export const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = 
   'crazy-eights': { emoji:'🃏', name:'Crazy Eights', desc:'2 players' },
   'wordle': { emoji:'🟩', name:'Wordle Duel', desc:'2 players' },
   'checkers': { emoji:'🔴', name:'Checkers', desc:'2 players' },
+  'categories': { emoji:'🔤', name:'Categories', desc:'2 players' },
 };
 
 export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
@@ -1935,6 +1979,185 @@ export function Checkers({ game, state, profile, accentColor, canPlay, players, 
           Move diagonally one square forward — or jump over your friend&apos;s piece to capture it. Jumps are mandatory, and a jump that opens another jump must continue. Reach the far row to be crowned king!
         </p>
       )}
+    </div>
+  );
+}
+
+// Categories — one letter, five categories, 60 seconds for both players.
+// Each player types one answer per category and submits; an answer
+// scores only when its first letter matches the game letter (no
+// dictionary — any word starting with the letter counts). Answers go
+// through the categories_submit RPC (migration 028) so two
+// near-simultaneous submits both land — the same race Trivia 018 /
+// RPS 022 / Wordle 026 fixed. The timer is armed once both players
+// are in; submit (or auto-submit at 0s) sends my answers, and the RPC
+// settles the duel when both have submitted or the deadline has passed.
+// Opponent progress is counts only — never their answers — until the
+// end, when both answer sheets are revealed with validity marks.
+export function CategoriesDuel({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+  const [now, setNow] = useState(() => Date.now());
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [note, setNote] = useState('');
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const armedRef = useRef(false);
+  const autoRef = useRef(false);
+  const submittedRef = useRef(false);
+
+  const letter: string = (state.letter || '').toUpperCase();
+  const categories: string[] = state.categories || [];
+  const answers: Record<string, Record<string, string>> = state.answers || {};
+  const doneMap: Record<string, boolean> = state.done || {};
+  const scores: Record<string, number> = state.scores || {};
+  const finished = state.phase === 'finished';
+  const endsAt: number | null = state.endsAt || null;
+  const remaining = endsAt ? Math.max(0, Math.ceil((endsAt - now) / 1000)) : 60;
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const myAnswers: Record<string, string> = answers[profile?.id] || {};
+  const theirAnswers: Record<string, string> = otherId ? (answers[otherId] || {}) : {};
+  const myDone = !!doneMap[profile?.id];
+  const theirDone = otherId ? !!doneMap[otherId] : false;
+  const myScore = categoriesScore(myAnswers, letter);
+  const theirScore = categoriesScore(theirAnswers, letter);
+  const myValidSoFar = categoriesScore(drafts, letter);
+  useWinnerSound(state.winner, profile?.id);
+
+  // Local clock for the countdown.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, []);
+
+  // Fresh round (new letter): clear my drafts and the once-only guards.
+  useEffect(() => {
+    setDrafts({});
+    setNote('');
+    submittedRef.current = false;
+    autoRef.current = false;
+    armedRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [letter, game.id]);
+
+  async function saveState(newState: any, done: boolean) {
+    const supabase = createClient();
+    await supabase.from('games').update({ state: newState, status: done ? 'finished' : 'active', winner_id: done && newState.winner && newState.winner !== 'draw' ? newState.winner : null }).eq('id', game.id);
+    onUpdate(newState);
+  }
+
+  // Arm the 60s timer once both players are in (either client may arm
+  // it; the writes are identical in shape, so a double-write is harmless).
+  useEffect(() => {
+    if (!canPlay || finished || endsAt || armedRef.current) return;
+    armedRef.current = true;
+    void saveState({ ...stateRef.current, endsAt: Date.now() + CATEGORIES_DURATION_MS }, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPlay, finished, endsAt]);
+
+  async function submit() {
+    if (!profile || !canPlay || myDone || finished || submittedRef.current) return;
+    const payload: Record<string, string> = {};
+    for (const c of categories) payload[c] = (drafts[c] || '').trim();
+    submittedRef.current = true;
+    setNote('');
+    playSound('pop');
+    const supabase = createClient();
+    const { data } = await supabase.rpc('categories_submit', { p_game_id: game.id, p_answers: payload });
+    if (data) {
+      onUpdate(data);
+    } else {
+      submittedRef.current = false;
+      setNote("Your answers didn't land — try again.");
+    }
+  }
+
+  // Auto-submit when the timer ends (the RPC merges my answers once and
+  // settles when both are in or the deadline has passed).
+  useEffect(() => {
+    if (!canPlay || finished || !endsAt || myDone || autoRef.current) return;
+    if (now <= endsAt) return;
+    autoRef.current = true;
+    void submit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPlay, finished, endsAt, myDone, now, drafts]);
+
+  if (!canPlay) {
+    return <div className="p-4 rounded-2xl text-center" style={{background:`${accentColor}22`}}><p className="font-bold theme-text">Waiting for the second player…</p></div>;
+  }
+
+  if (finished) {
+    const winnerText = state.winner === 'draw' ? "It's a draw! 🤝" : state.winner === profile?.id ? '🏆 You win!' : '🏆 Your friend wins!';
+    const row = (c: string) => {
+      const mine = (myAnswers[c] || '').trim();
+      const theirs = (theirAnswers[c] || '').trim();
+      return (
+        <div key={c} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
+          <span className="font-black w-20 flex-shrink-0 theme-text">{c}</span>
+          <span className="flex-1 min-w-0 truncate font-bold theme-text">{mine || '—'} {mine && (categoriesValidAnswer(mine, letter) ? <span style={{color:'#4CAF50'}}>✓</span> : <span style={{color:'#FF6B6B'}}>✗</span>)}</span>
+          <span className="flex-1 min-w-0 truncate text-right" style={{color:'var(--color-text-muted)'}}>{theirs || '—'} {theirs && (categoriesValidAnswer(theirs, letter) ? <span style={{color:'#4CAF50'}}>✓</span> : <span style={{color:'#FF6B6B'}}>✗</span>)}</span>
+        </div>
+      );
+    };
+    return (
+      <div className="space-y-4 text-center">
+        <div className="p-4 rounded-2xl" style={{background:`${accentColor}22`}}>
+          <p className="font-black text-lg theme-text">{winnerText}</p>
+          <p className="text-sm mt-1 font-bold theme-text">Final score — You: {myScore} · Them: {theirScore}</p>
+          <p className="text-xs mt-1" style={{color:'var(--color-text-muted)'}}>The letter was <b style={{color:'var(--color-text)'}}>{letter}</b> — a ✓ means the answer starts with {letter}.</p>
+          <p className="text-xs mt-2" style={{color:'var(--color-text-muted)'}}>Tap Restart above for a fresh round with a new letter.</p>
+        </div>
+        <div className="space-y-1.5 text-left">
+          <p className="flex text-xs font-black px-1" style={{color:'var(--color-text-muted)'}}><span className="w-20 flex-shrink-0">Category</span><span className="flex-1">You</span><span className="flex-1 text-right">Friend</span></p>
+          {categories.map(row)}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <span className="px-4 py-2 rounded-full font-black text-2xl" style={{background:`${accentColor}22`,color:accentColor}}>Letter: {letter}</span>
+        <span className="font-black text-sm theme-text" style={{color: remaining <= 10 ? '#FF6B6B' : 'var(--color-text)'}}>⏱ {endsAt ? `${remaining}s` : 'Waiting…'}</span>
+        <span className="text-xs font-bold" style={{color:'var(--color-text-muted)'}}>Valid: {myValidSoFar}/5</span>
+      </div>
+      {/* Their progress — counts only, never their answers. */}
+      {otherId && (
+        <p className="text-xs font-bold text-center" style={{color:'var(--color-text-muted)'}}>
+          Your friend: {theirDone ? `answered ${categoriesAnsweredCount(theirAnswers)}/5 ✓` : 'still thinking…'}
+        </p>
+      )}
+      <div className="space-y-2">
+        {categories.map((c) => (
+          <div key={c} className="flex items-center gap-2">
+            <label className="w-20 flex-shrink-0 text-sm font-black theme-text">{c}</label>
+            <input
+              value={myDone ? (myAnswers[c] || '') : (drafts[c] || '')}
+              onChange={(e) => setDrafts((d) => ({ ...d, [c]: e.target.value }))}
+              disabled={myDone}
+              maxLength={30}
+              placeholder={`${letter}…`}
+              className="flex-1 py-2.5 px-3 rounded-2xl text-sm font-bold"
+              style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}44`,outline:'none',color:'var(--color-text)'}}
+            />
+            {!myDone && drafts[c] && drafts[c].trim() !== '' && (
+              <span className="w-6 text-center font-black" style={{color: categoriesValidAnswer(drafts[c], letter) ? '#4CAF50' : '#FF6B6B'}}>
+                {categoriesValidAnswer(drafts[c], letter) ? '✓' : '✗'}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      {note && <p className="text-xs font-bold text-center" style={{color:'#FF6B6B'}}>{note}</p>}
+      {myDone ? (
+        <p className="text-sm font-bold text-center theme-text">Answers in! {theirDone ? 'Both submitted — revealing…' : 'Waiting for your friend to submit…'}</p>
+      ) : (
+        <button onClick={() => void submit()} className="w-full py-3 rounded-2xl text-sm font-black text-white transition-all hover:scale-[1.01]" style={{background:accentColor}}>
+          Submit answers ♡
+        </button>
+      )}
+      <p className="text-xs text-center font-semibold" style={{color:'var(--color-text-muted)'}}>
+        Every answer must start with {letter} — any word counts, no dictionary. Most valid answers in 60 seconds wins!
+      </p>
     </div>
   );
 }
