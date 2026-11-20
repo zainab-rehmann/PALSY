@@ -7,10 +7,11 @@ import type { Profile, Room, RoomMember, Message, MessageReceipt, Game } from '@
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, CheckCheck, Hash, Lock, LockOpen,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3, Image as ImageIcon
 } from 'lucide-react';
 import Link from 'next/link';
-import { GAME_META, initialStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel } from '@/components/GameComponents';
+import MediaGallery, { type GalleryItem } from '@/components/MediaGallery';
 import { PollCard } from '@/components/PollCard';
 import { PollForm } from '@/components/PollForm';
 
@@ -137,6 +138,12 @@ export default function RoomPage() {
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [showStarred, setShowStarred] = useState(false);
   const [starredMessages, setStarredMessages] = useState<Message[]>([]);
+  // Shared media gallery: photos + videos in THIS room only. The query
+  // runs only from the unlocked room view (a locked room returns the
+  // code prompt before this UI mounts), and is filtered to this room_id.
+  const [showGallery, setShowGallery] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
   // Room ticks: per-message receipt rows, keyed by message id. A message
   // counts as delivered/seen only when EVERY other current member has a
   // row (members who join later have none until they open the room).
@@ -759,6 +766,33 @@ export default function RoomPage() {
     }
   }
 
+  // Shared media gallery: every photo/video in THIS room only — newest
+  // first, images + videos with a media_url, deleted messages excluded.
+  // Filtered to this room_id, never a broad message read.
+  async function openGallery() {
+    setShowChatMenu(false);
+    if (!profile || gated) return;
+    setShowGallery(true);
+    setGalleryLoading(true);
+    const supabase = createClient();
+    const { data } = await supabase.from('messages')
+      .select('id,media_url,type,created_at,sender_id')
+      .eq('room_id', roomId)
+      .in('type', ['image', 'video']).not('media_url', 'is', null).eq('is_deleted', false)
+      .order('created_at', { ascending: false }).limit(200);
+    const byId: Record<string, string> = {};
+    for (const m of members) {
+      const p = m.profile as Profile | undefined;
+      if (p) byId[m.user_id] = p.display_name || p.username;
+    }
+    const items = ((data || []) as GalleryItem[]).map((m) => ({
+      ...m,
+      sender_name: m.sender_id === profile.id ? 'You' : (byId[m.sender_id] || 'Member'),
+    }));
+    setGalleryItems(items);
+    setGalleryLoading(false);
+  }
+
   async function openStarred() {
     setShowChatMenu(false);
     if (!profile) return;
@@ -1067,6 +1101,7 @@ export default function RoomPage() {
                 <div className="fixed inset-0 z-30" onClick={()=>setShowChatMenu(false)}/>
                 <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl p-2 z-40 space-y-1" style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 8px 30px rgba(0,0,0,0.12)'}}>
                   <button onClick={exportRoomChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:accentColor}}/> Export chat</button>
+                  <button onClick={openGallery} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ImageIcon size={16} style={{color:accentColor}}/> Media gallery</button>
                   <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:accentColor}}/> Starred messages</button>
                   <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:accentColor}}/> Select messages</button>
                   {(myRole==='owner'||myRole==='moderator') && (
@@ -1485,6 +1520,15 @@ export default function RoomPage() {
           </div>
         </>
       )}
+      {showGallery && (
+        <MediaGallery
+          items={galleryItems}
+          title={`Photos & videos in ${room.name}`}
+          accentColor={accentColor}
+          loading={galleryLoading}
+          onClose={() => setShowGallery(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1715,6 +1759,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
       {gameType==='crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='categories' && game && <CategoriesDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
     </div>
   );
 }
