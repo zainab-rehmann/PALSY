@@ -8,6 +8,7 @@ import type { Profile, Room, FriendRequest, Notification } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
 import { isBirthdayToday } from '@/lib/birthday';
 import NotificationBell from '@/components/NotificationBell';
+import Stories from '@/components/Stories';
 import { PalsyLogo } from '@/components/branding/PalsyLogo';
 import {
   Plus, Hash, MessageCircle, Users, Sparkles, ChevronRight,
@@ -119,6 +120,9 @@ export default function DashboardPage() {
               </Link>
             ))}
           </div>
+
+          {/* Stories — 24-hour photo/video updates from you + friends */}
+          <Stories profile={profile} />
 
           {/* Birthdays today */}
           {birthdayFriends.length > 0 && (
