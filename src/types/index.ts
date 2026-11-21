@@ -134,7 +134,7 @@ export interface Notification {
   created_at: string;
 }
 
-export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights' | 'wordle' | 'checkers' | 'categories';
+export type GameType = 'tictactoe' | 'number-guess' | 'hangman' | 'rps' | 'draw-guess' | 'trivia' | 'dots-boxes' | 'crazy-eights' | 'wordle' | 'checkers' | 'categories' | 'simon-says';
 export type GameStatus = 'waiting' | 'active' | 'finished';
 
 export interface Game {
@@ -175,4 +175,18 @@ export interface LockedChat {
   chat_type: 'dm' | 'room';
   target_id: string;
   locked_at: string;
+}
+
+// A story (migration 029): one photo or video, visible for 24 hours
+// after posting, to the poster's friends (and the poster themself).
+// The app only ever queries friends + self; see Stories.tsx.
+export interface Story {
+  id: string;
+  user_id: string;
+  media_url: string;
+  media_type: 'image' | 'video';
+  caption: string | null;
+  created_at: string;
+  expires_at: string;
+  owner?: Profile;
 }
