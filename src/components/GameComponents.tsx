@@ -6,7 +6,7 @@
 import { useEffect, useState, useRef, type PointerEvent as RPointerEvent } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Eraser } from 'lucide-react';
-import { playSound, useWinnerSound, useTurnSound } from '@/lib/sounds';
+import { playSound, playPadTone, useWinnerSound, useTurnSound, type PadIndex } from '@/lib/sounds';
 
 const DRAW_WORDS: { w: string; hint: string }[] = [
   { w: 'cat', hint: 'animal' }, { w: 'dog', hint: 'animal' }, { w: 'butterfly', hint: 'animal' },
@@ -378,6 +378,14 @@ export function initialStateFor(type: string, creatorId: string, otherId?: strin
     // the clock never runs while the second player is still joining.
     return { phase: 'playing', letter: pick.letter, categories: pick.categories, answers: {}, done: {}, scores: {}, endsAt: null, winner: null };
   }
+  if (type === 'simon-says') {
+    // Simon Says — both players repeat the SAME growing pattern.
+    // The pattern starts at one pad and grows by one each round both
+    // players complete. progress/alive/done/streak are keyed by
+    // player id and start empty: the RPC fills them in (a missing key
+    // means "has not acted yet" — alive, not done, 0 progress).
+    return { phase: 'playing', pattern: [Math.floor(Math.random() * 4)], round: 1, progress: {}, alive: {}, done: {}, streak: {}, winner: null };
+  }
   return {};
 }
 
@@ -394,6 +402,7 @@ export const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = 
   'wordle': { emoji:'🟩', name:'Wordle Duel', desc:'2 players' },
   'checkers': { emoji:'🔴', name:'Checkers', desc:'2 players' },
   'categories': { emoji:'🔤', name:'Categories', desc:'2 players' },
+  'simon-says': { emoji:'🎵', name:'Simon Says', desc:'2 players' },
 };
 
 export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
@@ -2157,6 +2166,173 @@ export function CategoriesDuel({ game, state, profile, accentColor, canPlay, pla
       )}
       <p className="text-xs text-center font-semibold" style={{color:'var(--color-text-muted)'}}>
         Every answer must start with {letter} — any word counts, no dictionary. Most valid answers in 60 seconds wins!
+      </p>
+    </div>
+  );
+}
+
+// Simon Says — game #12. Both players repeat the SAME growing
+// pattern of coloured pads. Each round the shared pattern grows by
+// one pad; playback is client-side per round (pads disabled until
+// the local playback finishes). Every tap goes through the
+// simon_says_input RPC (migration 030) — never a direct full-state
+// write for progress — so two players tapping at the same time can
+// never lose each other's progress (the Trivia 018 / RPS 022 /
+// Wordle 026 / Categories 028 race class). Round-end and finish
+// come from the shared state via the existing poll + realtime.
+// A wrong tap ends that player's run (alive=false); when both are
+// done the round settles: both completed -> pattern grows, next
+// round; one completed -> that player wins; both failed -> the
+// longer streak wins, equal streaks are a draw.
+const SIMON_PADS: { color: string; label: string }[] = [
+  { color: '#FF6B6B', label: 'Red' },
+  { color: '#4CAF50', label: 'Green' },
+  { color: '#5B8DEF', label: 'Blue' },
+  { color: '#F2C94C', label: 'Yellow' },
+];
+export function SimonSays({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+  const [litPad, setLitPad] = useState<number | null>(null);
+  const [playingBack, setPlayingBack] = useState(false);
+  const [note, setNote] = useState('');
+  const playedKeyRef = useRef(''); // "<gameId>:<round>" last played back locally
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const pattern: number[] = state.pattern || [];
+  const round: number = state.round || 1;
+  const progressMap: Record<string, number> = state.progress || {};
+  const aliveMap: Record<string, boolean> = state.alive || {};
+  const doneMap: Record<string, boolean> = state.done || {};
+  const streakMap: Record<string, number> = state.streak || {};
+  const finished = state.phase === 'finished';
+  const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const myProgress = progressMap[profile?.id] || 0;
+  const theirProgress = otherId ? (progressMap[otherId] || 0) : 0;
+  // A missing alive key means "has not acted yet" — still alive.
+  const myAlive = aliveMap[profile?.id] !== false;
+  const theirAlive = otherId ? aliveMap[otherId] !== false : true;
+  const myDone = !!doneMap[profile?.id];
+  const theirDone = otherId ? !!doneMap[otherId] : false;
+  const myStreak = streakMap[profile?.id] || 0;
+  const theirStreak = otherId ? (streakMap[otherId] || 0) : 0;
+  useWinnerSound(state.winner, profile?.id);
+
+  // Clear pending playback timers on unmount.
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => { timers.forEach((t) => clearTimeout(t)); };
+  }, []);
+
+  // Play the pattern back locally once per round (pads disabled
+  // while it plays). Keyed on "<gameId>:<round>": the 2s poll
+  // replaces the state object constantly, so the pattern array's
+  // identity is useless as a guard — the ref is the guard — and a
+  // restart (round back to 1, new game id) must play again. A
+  // remount mid-round replays the pattern, which is what a joining
+  // player needs to see it at all.
+  useEffect(() => {
+    if (!canPlay || finished || pattern.length === 0) return;
+    const key = `${game.id}:${round}`;
+    if (playedKeyRef.current === key) return;
+    playedKeyRef.current = key;
+    setPlayingBack(true);
+    setNote('');
+    pattern.forEach((pad, i) => {
+      timersRef.current.push(setTimeout(() => {
+        setLitPad(pad);
+        playPadTone(pad as PadIndex);
+        timersRef.current.push(setTimeout(() => setLitPad(null), 450));
+      }, 700 + i * 650));
+    });
+    timersRef.current.push(setTimeout(() => setPlayingBack(false), 700 + pattern.length * 650));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round, canPlay, finished]);
+
+  async function tapPad(pad: number) {
+    if (!profile || !canPlay || finished || playingBack || myDone || !myAlive) return;
+    playPadTone(pad as PadIndex);
+    setLitPad(pad);
+    timersRef.current.push(setTimeout(() => setLitPad(null), 300));
+    setNote('');
+    const supabase = createClient();
+    const { data } = await supabase.rpc('simon_says_input', { p_game_id: game.id, p_pad: pad });
+    if (data) {
+      const d = data as any;
+      if (d.alive?.[profile.id] === false) playSound('wrong');
+      else if (d.done?.[profile.id]) playSound('correct');
+      onUpdate(data);
+    } else {
+      setNote("That tap didn't land — try again.");
+    }
+  }
+
+  if (!canPlay) {
+    return <div className="p-4 rounded-2xl text-center" style={{ background: `${accentColor}22` }}><p className="font-bold theme-text">Waiting for the second player…</p></div>;
+  }
+
+  if (finished) {
+    const winnerText = state.winner === 'draw' ? "It's a draw! 🤝" : state.winner === profile?.id ? 'You win! 🎉' : 'Your friend wins! 🎉';
+    return (
+      <div className="space-y-4 text-center">
+        <div className="p-4 rounded-2xl" style={{ background: `${accentColor}22` }}>
+          <p className="font-black text-lg theme-text">{winnerText}</p>
+          <p className="text-sm mt-1 font-bold theme-text">Longest streak — You: {myStreak} · Friend: {theirStreak}</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>The pattern reached {pattern.length} {pattern.length === 1 ? 'pad' : 'pads'} in round {round}.</p>
+          <p className="text-xs mt-2" style={{ color: 'var(--color-text-muted)' }}>Tap Restart above for a fresh pattern ♡</p>
+        </div>
+      </div>
+    );
+  }
+
+  const status = playingBack
+    ? 'Watch the pattern… 👀'
+    : !myAlive
+      ? 'Oops — wrong pad! Your run is over this round…'
+      : myDone
+        ? 'You finished the pattern — waiting for your friend…'
+        : 'Your turn — repeat the pattern! ♡';
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-center gap-2 flex-wrap">
+        <span className="px-3 py-1.5 rounded-full font-black text-sm" style={{ background: `${accentColor}22`, color: accentColor }}>Round {round} · {pattern.length} {pattern.length === 1 ? 'pad' : 'pads'}</span>
+        <span className="px-3 py-1.5 rounded-full font-black text-sm theme-text" style={{ background: 'rgba(var(--color-overlay-rgb),0.8)' }}>Streak — You {myStreak} · Friend {theirStreak}</span>
+      </div>
+      <p className="text-sm font-bold text-center theme-text">{status}</p>
+      {/* My progress — one dot per pad in the pattern. */}
+      <div className="flex gap-1.5 justify-center">
+        {pattern.map((_, i) => (
+          <span key={i} className="w-3 h-3 rounded-full" style={{ background: i < myProgress ? accentColor : 'var(--color-border)' }} />
+        ))}
+      </div>
+      {/* Their progress — counts only, never which pads they tapped. */}
+      {otherId && (
+        <p className="text-xs font-bold text-center" style={{ color: 'var(--color-text-muted)' }}>
+          Your friend: {theirProgress}/{pattern.length} taps
+          {!theirAlive ? ' · wrong pad ✗' : theirDone ? ' · finished ✓' : ' · still tapping…'}
+        </p>
+      )}
+      {/* The board — 2x2 pads, fits 390px. */}
+      <div className="grid grid-cols-2 gap-3 max-w-[280px] mx-auto w-full">
+        {SIMON_PADS.map((pad, i) => {
+          const lit = litPad === i;
+          const disabled = playingBack || myDone || !myAlive;
+          return (
+            <button key={i} onClick={() => void tapPad(i)} disabled={disabled} aria-label={`${pad.label} pad`}
+              className="aspect-square rounded-3xl transition-all"
+              style={{
+                background: pad.color,
+                opacity: lit ? 1 : disabled ? 0.35 : 0.55,
+                transform: lit ? 'scale(1.06)' : 'scale(1)',
+                border: lit ? '4px solid #fff' : '4px solid transparent',
+              }}>
+              <span className="sr-only">{pad.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {note && <p className="text-xs font-bold text-center" style={{ color: '#FF6B6B' }}>{note}</p>}
+      <p className="text-xs text-center font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+        Watch the pads light up, then tap them back in the same order. One wrong tap ends your run — the longest streak wins!
       </p>
     </div>
   );
