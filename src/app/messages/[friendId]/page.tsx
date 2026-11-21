@@ -16,7 +16,7 @@ import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSni
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LockerPrompt from '@/components/LockerPrompt';
-import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel } from '@/components/GameComponents';
+import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel, SimonSays } from '@/components/GameComponents';
 import MediaGallery, { type GalleryItem } from '@/components/MediaGallery';
 import { PollCard } from '@/components/PollCard';
 import { PollForm } from '@/components/PollForm';
@@ -1506,6 +1506,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
       {gameType === 'wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'categories' && game && <CategoriesDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'simon-says' && game && <SimonSays game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
     </div>
   );
 }
