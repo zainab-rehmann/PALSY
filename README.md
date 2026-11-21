@@ -19,7 +19,8 @@
 - 😊 Full emoji picker (1,923 emojis) + 16 quick reactions in DMs and rooms (reactions arrive live)
 - 📊 Polls in DMs and rooms — ask a question, everyone votes, results update live
 - ↩️ Reply, pin and star messages; export / clear chat; select + bulk delete
-- 🎮 11 multiplayer games, in rooms and in DMs: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman, Draw & Guess, Trivia Duel (72-question bank), Dots & Boxes, Crazy Eights, Wordle Duel, Checkers, Categories — with game sounds (mute is saved per person, in Settings or in any game)
+- 🎮 12 multiplayer games, in rooms and in DMs: Tic Tac Toe, Rock Paper Scissors, Number Guess, Hangman, Draw & Guess, Trivia Duel (72-question bank), Dots & Boxes, Crazy Eights, Wordle Duel, Checkers, Categories, Simon Says — with game sounds (mute is saved per person, in Settings or in any game)
+- 📸 Stories — 24-hour photo/video updates from you and your friends, on the Dashboard
 - 🔔 Notification bell + pop-ups (mute per room)
 - 📱 Fully responsive (mobile + desktop) and installable as an app (PWA)
 - 🌐 Ready for Vercel deployment
@@ -38,7 +39,7 @@ npm install
 ### 2. Set up Supabase
 1. Create a project at [supabase.com](https://supabase.com)
 2. Go to your project → SQL Editor
-3. Run the migrations in order: `supabase/migrations/001_initial.sql`, then `002`–`028`
+3. Run the migrations in order: `supabase/migrations/001_initial.sql`, then `002`–`030`
 4. Set up a Storage bucket named `media` (public)
 
 ### 3. Configure environment variables
@@ -78,9 +79,9 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## 🗄️ Database
 
-Run the migrations in `supabase/migrations/` in order in your Supabase SQL Editor (001, then 002–028). The full consolidated schema is also kept at `supabase/palsy-supabase-schema-2026-11-10.sql` for reference.
+Run the migrations in `supabase/migrations/` in order in your Supabase SQL Editor (001, then 002–030). The full consolidated schema is also kept at `supabase/palsy-supabase-schema-2026-11-10.sql` for reference.
 
-Tables: `profiles`, `friend_requests`, `friendships`, `rooms`, `room_members`, `messages`, `message_reactions`, `poll_votes`, `notifications`, `games`, `game_players`, `message_receipts`, `room_entry_codes`, `locker_codes`, `locked_chats`
+Tables: `profiles`, `friend_requests`, `friendships`, `rooms`, `room_members`, `messages`, `message_reactions`, `poll_votes`, `notifications`, `games`, `game_players`, `message_receipts`, `room_entry_codes`, `locker_codes`, `locked_chats`, `stories`
 
 All tables have Row Level Security (RLS) enabled.
 
