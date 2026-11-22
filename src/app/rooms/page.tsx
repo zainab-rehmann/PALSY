@@ -214,7 +214,7 @@ function RoomsContent() {
               <p className="text-sm" style={{color:'var(--color-text-muted)'}}>Create a cozy little room for you and your friends. ♡</p>
               <div className="flex gap-3 justify-center flex-wrap">
                 <button onClick={()=>setModal('create')} className="theme-btn px-5 py-2.5 text-sm flex items-center gap-2"><Plus size={15}/>Create Room</button>
-                <button onClick={()=>setModal('join')} className="theme-btn-outline px-5 py-2.5 text-sm flex items-center gap-2" style={{borderColor:'var(--color-accent)',color:'var(--color-accent)'}}><Search size={15}/>Join Room</button>
+                <button onClick={()=>setModal('join')} className="theme-btn-outline px-5 py-2.5 text-sm flex items-center gap-2" style={{borderColor:'var(--color-accent)',color:'var(--color-text)'}}><Search size={15}/>Join Room</button>
               </div>
             </div>
           ) : rooms.filter(r=>!lockedIds.has(r.id)).length===0 ? (
@@ -276,7 +276,7 @@ function RoomsContent() {
 
             {modal==='create' && (
               <form onSubmit={createRoom} className="space-y-4">
-                {createError && <div className="p-3 rounded-xl text-sm font-medium" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>{createError}</div>}
+                {createError && <div className="p-3 rounded-xl text-sm font-medium" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}>{createError}</div>}
                 <input type="text" placeholder="Room name *" value={name} onChange={e=>setName(e.target.value)} className="theme-input w-full py-3 px-4 text-sm"/>
                 <textarea placeholder="Description (optional)" value={desc} onChange={e=>setDesc(e.target.value)} className="theme-input w-full py-3 px-4 text-sm resize-none" rows={2}/>
                 <div>
@@ -319,7 +319,7 @@ function RoomsContent() {
 
             {modal==='join' && joinStep==='invite' && (
               <form onSubmit={joinRoom} className="space-y-4">
-                {joinError && <div className="p-3 rounded-xl text-sm font-medium" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>{joinError}</div>}
+                {joinError && <div className="p-3 rounded-xl text-sm font-medium" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}>{joinError}</div>}
                 <div>
                   <p className="text-sm mb-3" style={{color:'var(--color-text-muted)'}}>Enter the room invite code you received from a friend.</p>
                   <input type="text" placeholder="Invite code (e.g. AB12CD34)" value={inviteCode}
