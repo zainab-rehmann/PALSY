@@ -1077,7 +1077,7 @@ export default function RoomPage() {
           <button onClick={()=>{setSelectMode(false); setSelectedIds(new Set());}} className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}><X size={18} style={{color:accentColor}}/></button>
           <p className="font-black text-sm theme-text flex-1">{selectedIds.size} selected</p>
           <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-') && canSelect(m)).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)',color:'var(--color-text)'}}>Select all</button>
-          <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#FF6B6B',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
+          <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#C62828',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
         </header>
       ) : (
       <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(var(--color-overlay-rgb),0.4)'}}>
@@ -1099,13 +1099,13 @@ export default function RoomPage() {
             {showChatMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={()=>setShowChatMenu(false)}/>
-                <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl p-2 z-40 space-y-1" style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 8px 30px rgba(0,0,0,0.12)'}}>
+                <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl p-2 z-40 space-y-1" style={{background:'var(--color-surface)',border:`1px solid ${accentColor}33`,boxShadow:'0 8px 30px rgba(0,0,0,0.12)'}}>
                   <button onClick={exportRoomChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:accentColor}}/> Export chat</button>
                   <button onClick={openGallery} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ImageIcon size={16} style={{color:accentColor}}/> Media gallery</button>
                   <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:accentColor}}/> Starred messages</button>
                   <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:accentColor}}/> Select messages</button>
                   {(myRole==='owner'||myRole==='moderator') && (
-                    <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'#FF6B6B'}}><Trash2 size={16}/> Clear chat</button>
+                    <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-danger)'}}><Trash2 size={16}/> Clear chat</button>
                   )}
                 </div>
               </>
@@ -1115,7 +1115,7 @@ export default function RoomPage() {
       </header>
       )}
       {sendError && tab==='chat' && (
-        <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,107,107,0.12)',color:'#FF6B6B'}}>{sendError} <button onClick={()=>setSendError('')} className="underline ml-1">Dismiss</button></div>
+        <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,107,107,0.12)',color:'var(--color-danger)'}}>{sendError} <button onClick={()=>setSendError('')} className="underline ml-1">Dismiss</button></div>
       )}
 
       {/* Tab bar */}
@@ -1123,7 +1123,7 @@ export default function RoomPage() {
         {(['chat','members','games','settings'] as Tab[]).map(t=>(
           <button key={t} onClick={()=>{ if (t==='chat') pendingBottomRef.current = true; setTab(t); }}
             className="px-4 py-2 rounded-t-xl text-xs font-bold capitalize transition-all"
-            style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?accentColor:'var(--color-text-muted)',borderBottom:tab===t?`2px solid ${accentColor}`:undefined}}>
+            style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?'var(--color-text)':'var(--color-text-muted)',borderBottom:tab===t?`2px solid ${accentColor}`:undefined}}>
             {t==='chat'?'💬 Chat':t==='members'?`👥 (${members.length})`:t==='games'?'🎮 Games':'⚙️ Settings'}
           </button>
         ))}
@@ -1154,7 +1154,7 @@ export default function RoomPage() {
               {room.welcome_message && messages.length===0 && (
                 <div className="text-center py-6">
                   <div className="text-4xl mb-2">{preset?.emoji||'🏠'}</div>
-                  <p className="text-sm font-bold" style={{color:accentColor}}>{room.welcome_message}</p>
+                  <p className="text-sm font-bold" style={{color:'var(--color-text)'}}>{room.welcome_message}</p>
                 </div>
               )}
               {messages.map((msg, i)=>{
@@ -1175,7 +1175,7 @@ export default function RoomPage() {
                     {divider}
                   <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'}`} style={highlightId===msg.id?{background:'rgba(var(--color-overlay-rgb),0.6)',borderRadius:16,outline:`2px solid ${accentColor}`,outlineOffset:2}:selected?{background:'rgba(var(--color-overlay-rgb),0.6)',borderRadius:16}:undefined} onClick={selectMode && selectable ? ()=>toggleSelect(msg.id) : undefined}>
                     {selectMode && selectable && (
-                      <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?accentColor:'rgba(0,0,0,0.25)',background:selected?accentColor:'transparent',color:'#fff'}}>
+                      <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?accentColor:'rgba(0,0,0,0.25)',background:selected?accentColor:'transparent',color:'var(--color-on-accent)'}}>
                         {selected && <Check size={14}/>}
                       </button>
                     )}
@@ -1196,7 +1196,7 @@ export default function RoomPage() {
                                 <span className="text-xs italic" style={{color:'var(--color-text-muted)'}}>Message deleted</span>
                               ) : q ? (
                                 <>
-                                  <span className="block text-xs font-bold" style={{color:accentColor}}>↩ {senderName(q, q.sender_id === profile?.id ? 'You' : 'Member')}</span>
+                                  <span className="block text-xs font-bold" style={{color:'var(--color-text)'}}>↩ {senderName(q, q.sender_id === profile?.id ? 'You' : 'Member')}</span>
                                   <span className="block text-xs truncate" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(q)}</span>
                                 </>
                               ) : (
@@ -1232,7 +1232,7 @@ export default function RoomPage() {
                         {actionMsg===msg.id && (
                           <>
                           <div className="fixed inset-0 z-[5]" onClick={()=>setActionMsg(null)}/>
-                          <div className={`absolute ${menuBelow?'top-full mt-1':'bottom-full mb-1'} ${mine?'right-0':'left-0'} flex flex-col gap-1 p-1.5 rounded-2xl z-20`} style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
+                          <div className={`absolute ${menuBelow?'top-full mt-1':'bottom-full mb-1'} ${mine?'right-0':'left-0'} flex flex-col gap-1 p-1.5 rounded-2xl z-20`} style={{background:'var(--color-surface)',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
                             <div className="flex gap-1" style={{flexWrap:'wrap',maxWidth:320}}>
                               {EMOJI_LIST.map(e=><button key={e} onClick={()=>addReaction(msg.id,e)} className="text-lg hover:scale-125 transition-transform">{e}</button>)}
                             </div>
@@ -1247,7 +1247,7 @@ export default function RoomPage() {
                             {mine && msg.type !== 'poll' && (
                               <div className="flex gap-1 pt-1" style={{borderTop:`1px solid ${accentColor}33`}}>
                                 <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
-                                <button onClick={()=>deleteRoomMessage(msg.id)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}><Trash2 size={12}/> Delete</button>
+                                <button onClick={()=>deleteRoomMessage(msg.id)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}><Trash2 size={12}/> Delete</button>
                               </div>
                             )}
                           </div>
@@ -1264,7 +1264,7 @@ export default function RoomPage() {
                           ))}
                         </div>
                       )}
-                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:accentColor}}/>}{starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{ticks === 'seen' ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-accent)'}}><CheckCheck size={15}/> Seen</span> : ticks === 'delivered' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span> : ticks === 'sent' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span> : null}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}</span>
+                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:accentColor}}/>}{starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{ticks === 'seen' ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-text)'}}><CheckCheck size={15}/> Seen</span> : ticks === 'delivered' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span> : ticks === 'sent' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span> : null}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'var(--color-danger)'}}>Not sent · Tap to retry</button>}</span>
                     </div>
                   </div>
                   </Fragment>
@@ -1302,10 +1302,10 @@ export default function RoomPage() {
               <button type="button" disabled={uploading} onClick={() => fileInputRef.current?.click()} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background:`${accentColor}22`,color:accentColor}} title="Attach media">
                 <Paperclip size={18}/>
               </button>
-              <button type="button" onClick={isRecording ? stopRoomRecording : startRoomRecording} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: isRecording ? '#FF6B6B' : `${accentColor}22`, color: isRecording ? 'white' : accentColor}} title={isRecording ? 'Stop recording' : 'Record voice message'}>
+              <button type="button" onClick={isRecording ? stopRoomRecording : startRoomRecording} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: isRecording ? '#C62828' : `${accentColor}22`, color: isRecording ? 'white' : accentColor}} title={isRecording ? 'Stop recording' : 'Record voice message'}>
                 {isRecording ? <Square size={16}/> : <Mic size={18}/>}
               </button>
-              {isRecording && <span className="text-xs font-bold flex-shrink-0" style={{color:'#FF6B6B'}}>{Math.floor(recordTime/60)}:{String(recordTime%60).padStart(2,'0')}</span>}
+              {isRecording && <span className="text-xs font-bold flex-shrink-0" style={{color:'var(--color-danger)'}}>{Math.floor(recordTime/60)}:{String(recordTime%60).padStart(2,'0')}</span>}
               <button type="button" onClick={() => setShowEmojis(v=>!v)} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showEmojis ? accentColor : `${accentColor}22`, color: showEmojis ? 'white' : accentColor}} title="Add emoji">
                 <Smile size={18}/>
               </button>
@@ -1318,7 +1318,7 @@ export default function RoomPage() {
                 placeholder="Say something nice... ♡" rows={1}
                 className="flex-1 py-3 px-4 rounded-2xl resize-none text-sm"
                 style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}44`,outline:'none',minHeight:44,maxHeight:100,fontFamily:"'Nunito',sans-serif"}}/>
-              <button type="submit" disabled={!input.trim()} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-110" style={{background:accentColor,color:'white'}}>
+              <button type="submit" disabled={!input.trim()} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-110" style={{background:accentColor,color:'var(--color-on-accent)'}}>
                 <Send size={16}/>
               </button>
             </form>
@@ -1363,7 +1363,7 @@ export default function RoomPage() {
                   <p className="text-sm font-bold theme-text">{room.name}</p>
                   <p className="text-xs" style={{color:'var(--color-text-muted)'}}>This is the picture everyone sees for this room. Anyone in the room can change it ♡</p>
                 </div>
-                <button onClick={()=>roomPicRef.current?.click()} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white flex-shrink-0" style={{background:accentColor}}>
+                <button onClick={()=>roomPicRef.current?.click()} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold flex-shrink-0" style={{background:accentColor,color:'var(--color-on-accent)'}}>
                   <Camera size={14}/> Change
                 </button>
               </div>
@@ -1389,7 +1389,7 @@ export default function RoomPage() {
                   <h3 className="font-black theme-text flex items-center gap-2">{myMuted ? <BellOff size={16}/> : <Bell size={16}/>} Room Notifications</h3>
                   <p className="text-xs mt-0.5" style={{color:'var(--color-text-muted)'}}>{myMuted ? 'You will not get pop-ups for this room.' : 'You get a pop-up when someone messages in this room.'}</p>
                 </div>
-                <button onClick={toggleMute} className="px-4 py-2 rounded-full text-xs font-bold text-white flex-shrink-0" style={{background: myMuted ? '#9CA3AF' : accentColor}}>
+                <button onClick={toggleMute} className="px-4 py-2 rounded-full text-xs font-bold flex-shrink-0" style={{background: myMuted ? '#9CA3AF' : accentColor, color:'var(--color-on-accent)'}}>
                   {myMuted ? 'Muted' : 'On'}
                 </button>
               </div>
@@ -1414,11 +1414,11 @@ export default function RoomPage() {
                   </button>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={saveEntryCode} disabled={codeBusy || !codeInput.trim()} className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white" style={{background:accentColor,opacity: codeBusy || !codeInput.trim() ? 0.6 : 1}}>
+                  <button onClick={saveEntryCode} disabled={codeBusy || !codeInput.trim()} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:accentColor,color:'var(--color-on-accent)',opacity: codeBusy || !codeInput.trim() ? 0.6 : 1}}>
                     {room.has_entry_code ? 'Change Code' : 'Set Code'}
                   </button>
                   {room.has_entry_code && (
-                    <button onClick={removeEntryCode} disabled={codeBusy} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+                    <button onClick={removeEntryCode} disabled={codeBusy} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}>
                       Remove Code
                     </button>
                   )}
@@ -1426,7 +1426,7 @@ export default function RoomPage() {
                 {savedCode && (
                   <div className="flex items-center gap-2 p-3 rounded-xl font-mono text-sm" style={{background:'var(--color-secondary)'}}>
                     <span className="flex-1 font-bold tracking-widest">{savedCode}</span>
-                    <button onClick={copyEntryCode} className="p-1.5 rounded-lg" style={{background:accentColor,color:'white'}}>
+                    <button onClick={copyEntryCode} className="p-1.5 rounded-lg" style={{background:accentColor,color:'var(--color-on-accent)'}}>
                       {codeCopied?<Check size={14}/>:<Copy size={14}/>}
                     </button>
                   </div>
@@ -1445,7 +1445,7 @@ export default function RoomPage() {
               <p className="text-xs" style={{color:'var(--color-text-muted)'}}>
                 Personal and optional: locking hides this room from YOUR rooms list and hides its message previews in notifications. Other members are not affected. It needs your locker code from Settings → Account.
               </p>
-              <button onClick={toggleRoomLock} className="w-full py-2.5 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-2" style={{background:accentColor}}>
+              <button onClick={toggleRoomLock} className="w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2" style={{background:accentColor,color:'var(--color-on-accent)'}}>
                 {isLocked ? <><LockOpen size={14}/> Unlock this room</> : <><Lock size={14}/> Lock this room</>}
               </button>
             </div>
@@ -1455,7 +1455,7 @@ export default function RoomPage() {
                 <p className="text-xs font-bold mb-1" style={{color:'var(--color-text-muted)'}}>Invite Code</p>
                 <div className="flex items-center gap-2 p-3 rounded-xl font-mono text-sm" style={{background:'var(--color-secondary)'}}>
                   <span className="flex-1 font-bold tracking-widest">{room.invite_code}</span>
-                  <button onClick={copyInviteCode} className="p-1.5 rounded-lg" style={{background:accentColor,color:'white'}}>
+                  <button onClick={copyInviteCode} className="p-1.5 rounded-lg" style={{background:accentColor,color:'var(--color-on-accent)'}}>
                     {copied?<Check size={14}/>:<Copy size={14}/>}
                   </button>
                 </div>
@@ -1464,12 +1464,12 @@ export default function RoomPage() {
             </div>
             <div className="space-y-2">
               {myRole!=='owner' && (
-                <button onClick={leaveRoom} className="w-full p-3 rounded-2xl flex items-center gap-3 font-bold text-sm" style={{background:'rgba(255,107,107,0.08)',color:'#FF6B6B'}}>
+                <button onClick={leaveRoom} className="w-full p-3 rounded-2xl flex items-center gap-3 font-bold text-sm" style={{background:'rgba(255,107,107,0.08)',color:'var(--color-danger)'}}>
                   <LogOut size={16}/>Leave Room
                 </button>
               )}
               {myRole==='owner' && (
-                <button onClick={deleteRoom} className="w-full p-3 rounded-2xl flex items-center gap-3 font-bold text-sm" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+                <button onClick={deleteRoom} className="w-full p-3 rounded-2xl flex items-center gap-3 font-bold text-sm" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}>
                   <Trash2 size={16}/>Delete Room
                 </button>
               )}
@@ -1498,7 +1498,7 @@ export default function RoomPage() {
       {showStarred && (
         <>
           <div className="fixed inset-0 z-40" style={{background:'rgba(0,0,0,0.35)'}} onClick={()=>setShowStarred(false)}/>
-          <div className="fixed inset-x-4 top-20 z-50 mx-auto max-w-md rounded-3xl p-4 max-h-[70vh] overflow-y-auto" style={{background:'#fff',border:`1px solid ${accentColor}33`,boxShadow:'0 12px 40px rgba(0,0,0,0.2)'}}>
+          <div className="fixed inset-x-4 top-20 z-50 mx-auto max-w-md rounded-3xl p-4 max-h-[70vh] overflow-y-auto" style={{background:'var(--color-surface)',border:`1px solid ${accentColor}33`,boxShadow:'0 12px 40px rgba(0,0,0,0.2)'}}>
             <div className="flex items-center gap-2 mb-3">
               <Star size={18} style={{color:'#F5B301'}}/>
               <p className="font-black text-sm theme-text flex-1">Starred messages</p>
@@ -1708,7 +1708,7 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
             <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{liveGame.created_by===profile?.id ? 'You started this game — jump back in.' : 'A friend started this game — join and play together, live.'}</p>
           </div>
           <button onClick={()=>{ if (liveGame.created_by!==profile?.id) joinGame(liveGame); else openGame(liveGame); }}
-            className="px-4 py-2 rounded-full text-xs font-bold text-white flex-shrink-0" style={{background:accentColor}}>
+            className="px-4 py-2 rounded-full text-xs font-bold flex-shrink-0" style={{background:accentColor,color:'var(--color-on-accent)'}}>
             {liveGame.created_by===profile?.id ? 'Open' : 'Join'}
           </button>
         </div>
@@ -1738,8 +1738,8 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
         <span className="text-xs ml-auto" style={{color:'var(--color-text-muted)'}}>{players.length} player{players.length===1?'':'s'} in</span>
         <SoundToggle userId={profile?.id}/>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
-          style={{background:accentColor, opacity: bothIn ? 1 : 0.45}}>
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold flex-shrink-0 transition-all"
+          style={{background:accentColor, color:'var(--color-on-accent)', opacity: bothIn ? 1 : 0.45}}>
           <RotateCcw size={13}/> Restart
         </button>
       </div>
