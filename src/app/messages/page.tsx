@@ -142,7 +142,7 @@ export default function MessagesPage() {
                 <p className="font-bold text-sm theme-text">{f.display_name||f.username}</p>
                 <p className="text-xs" style={{color:'var(--color-text-muted)'}}>{isFreshOnline(f)?'🟢 Online':presenceLabel(f)}</p>
               </div>
-              {unread[f.id] ? <span className="text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{background:'var(--color-accent)',color:'#fff'}}>{unread[f.id]} new</span> : null}
+              {unread[f.id] ? <span className="text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{background:'var(--color-accent)',color:'var(--color-on-accent)'}}>{unread[f.id]} new</span> : null}
               <ChevronRight size={16} style={{color:'var(--color-text-muted)'}}/>
             </Link>
           ))}
