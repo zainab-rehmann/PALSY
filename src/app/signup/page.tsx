@@ -144,7 +144,7 @@ export default function SignupPage() {
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl text-sm font-medium text-center" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B',border:'1px solid rgba(255,107,107,0.2)'}}>
+            <div className="p-3 rounded-xl text-sm font-medium text-center" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)',border:'1px solid rgba(255,107,107,0.2)'}}>
               {error}
             </div>
           )}
@@ -196,7 +196,7 @@ export default function SignupPage() {
             </div>
             <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Lowercase letters, numbers and underscores only, 3–20 characters, no spaces. Pick your own name — never your email address.</p>
             {usernameMsg && (
-              <p className="text-xs font-bold" style={{color:usernameStatus==='available'?'#22C55E':usernameStatus==='checking'?'var(--color-text-muted)':'#FF6B6B'}}>{usernameMsg}</p>
+              <p className="text-xs font-bold" style={{color:usernameStatus==='available'?'#22C55E':usernameStatus==='checking'?'var(--color-text-muted)':'var(--color-danger)'}}>{usernameMsg}</p>
             )}
 
             <div className="relative">
@@ -221,7 +221,7 @@ export default function SignupPage() {
               </button>
             </div>
             {confirm && password !== confirm && (
-              <p className="text-xs" style={{color:'#FF6B6B'}}>Passwords do not match</p>
+              <p className="text-xs" style={{color:'var(--color-danger)'}}>Passwords do not match</p>
             )}
 
             <button type="submit" disabled={loading} className="theme-btn w-full py-3 text-sm flex items-center justify-center gap-2 mt-2">
@@ -233,7 +233,7 @@ export default function SignupPage() {
 
           <p className="text-center text-sm" style={{color:'var(--color-text-muted)'}}>
             Already have an account?{' '}
-            <Link href="/login" className="font-bold" style={{color:'var(--color-accent)'}}>Log in ♡</Link>
+            <Link href="/login" className="font-bold" style={{color:'var(--color-accent-text)'}}>Log in ♡</Link>
           </p>
         </div>
       </div>
