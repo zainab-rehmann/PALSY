@@ -107,7 +107,7 @@ export default function DashboardPage() {
           {/* Quick Actions */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { href:'/rooms?action=create', icon:Plus, label:'Create Room', color:'var(--color-accent)', bg:'var(--color-secondary)' },
+              { href:'/rooms?action=create', icon:Plus, label:'Create Room', color:'var(--color-accent-text)', bg:'var(--color-secondary)' },
               { href:'/rooms?action=join', icon:Compass, label:'Join Room', color:'var(--color-text)', bg:'var(--color-secondary)' },
               { href:'/friends?tab=search', icon:Search, label:'Find Friends', color:'var(--color-text)', bg:'var(--color-secondary)' },
               { href:'/games', icon:Gamepad2, label:'Play Games', color:'var(--color-text)', bg:'var(--color-secondary)' },
@@ -126,14 +126,14 @@ export default function DashboardPage() {
 
           {/* Birthdays today */}
           {birthdayFriends.length > 0 && (
-            <div className="theme-card p-5" style={{ background: '#FFE3EE', border: '2px solid #FF9EBB' }}>
+            <div className="theme-card p-5" style={{ background: 'var(--color-secondary)', border: '2px solid var(--color-border)' }}>
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xl">🎂</span>
-                <h2 className="font-black text-sm" style={{ color: '#D6336C' }}>Birthdays today!</h2>
+                <h2 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>Birthdays today!</h2>
               </div>
               <div className="space-y-2">
                 {birthdayFriends.map(f => (
-                  <Link key={f.id} href={`/messages/${f.id}`} className="flex items-center gap-3 p-2 rounded-2xl transition-all hover:scale-[1.01]" style={{ background: 'rgba(255,255,255,0.7)' }}>
+                  <Link key={f.id} href={`/messages/${f.id}`} className="flex items-center gap-3 p-2 rounded-2xl transition-all hover:scale-[1.01]" style={{ background: 'var(--color-surface)' }}>
                     <Avatar profile={f} size={36} />
                     <div className="flex-1 min-w-0">
                       <p className="font-bold text-sm theme-text">It&apos;s {f.display_name || f.username}&apos;s birthday! 🎂</p>
@@ -159,7 +159,7 @@ export default function DashboardPage() {
                 ))}
               </div>
               {pendingRequests.length > 3 && (
-                <Link href="/friends?tab=requests" className="text-xs font-bold mt-3 block text-center" style={{color:'var(--color-accent)'}}>
+                <Link href="/friends?tab=requests" className="text-xs font-bold mt-3 block text-center" style={{color:'var(--color-accent-text)'}}>
                   View all {pendingRequests.length} requests →
                 </Link>
               )}
@@ -170,7 +170,7 @@ export default function DashboardPage() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-black text-base theme-text flex items-center gap-2"><Hash size={16} style={{color:'var(--color-accent)'}}/>My Rooms</h2>
-              <Link href="/rooms" className="text-xs font-bold" style={{color:'var(--color-accent)'}}>See all</Link>
+              <Link href="/rooms" className="text-xs font-bold" style={{color:'var(--color-accent-text)'}}>See all</Link>
             </div>
             {rooms.length === 0 ? (
               <div className="theme-card p-8 text-center space-y-3">
