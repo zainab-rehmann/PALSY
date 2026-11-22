@@ -301,7 +301,7 @@ export default function SettingsPage() {
             {(['profile','appearance','notifications','account'] as const).map(t=>(
               <button key={t} onClick={()=>setTab(t)}
                 className="flex-1 py-2 rounded-xl text-sm font-bold capitalize transition-all"
-                style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?'var(--color-accent)':'var(--color-text-muted)',boxShadow:tab===t?'0 2px 8px var(--color-primary-alpha)':undefined}}>
+                style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?'var(--color-text)':'var(--color-text-muted)',boxShadow:tab===t?'0 2px 8px var(--color-primary-alpha)':undefined}}>
                 {t==='profile'?'👤 Profile':t==='appearance'?'🎨 Theme':t==='notifications'?'🔔 Alerts':'🔒 Account'}
               </button>
             ))}
@@ -316,7 +316,7 @@ export default function SettingsPage() {
                   className="theme-input w-full py-3 px-4 text-sm" placeholder="your_username"/>
                 <p className="text-xs mt-1.5" style={{color:'var(--color-text-muted)'}}>Lowercase letters, numbers and underscores only, 3–20 characters, no spaces. Your friends, chats and rooms stay yours — only the name changes.</p>
                 {usernameMsg && (
-                  <p className="text-xs mt-1.5 font-bold" style={{color:usernameStatus==='available'||usernameMsg==='Username updated ✓'?'#22C55E':usernameStatus==='checking'?'var(--color-text-muted)':'#FF6B6B'}}>{usernameMsg}</p>
+                  <p className="text-xs mt-1.5 font-bold" style={{color:usernameStatus==='available'||usernameMsg==='Username updated ✓'?'#22C55E':usernameStatus==='checking'?'var(--color-text-muted)':'var(--color-danger)'}}>{usernameMsg}</p>
                 )}
               </div>
               <div>
@@ -324,7 +324,7 @@ export default function SettingsPage() {
                 <input type="text" value={displayName} maxLength={30} onChange={e=>setDisplayName(e.target.value)} className="theme-input w-full py-3 px-4 text-sm" placeholder="Your display name"/>
                 <p className="text-xs mt-1.5" style={{color:'var(--color-text-muted)'}}>One name, one person — display names must be unique, just like usernames, so search finds the right person. Leave it blank to show your username instead.</p>
                 {displayNameMsg && (
-                  <p className="text-xs mt-1.5 font-bold" style={{color:displayNameStatus==='available'||displayNameMsg==='Name updated ✓'?'#22C55E':displayNameStatus==='checking'?'var(--color-text-muted)':'#FF6B6B'}}>{displayNameMsg}</p>
+                  <p className="text-xs mt-1.5 font-bold" style={{color:displayNameStatus==='available'||displayNameMsg==='Name updated ✓'?'#22C55E':displayNameStatus==='checking'?'var(--color-text-muted)':'var(--color-danger)'}}>{displayNameMsg}</p>
                 )}
               </div>
               <div>
@@ -422,7 +422,7 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                {notifSaved && <p className="text-xs font-bold" style={{color:'var(--color-accent)'}}>Saved ♡</p>}
+                {notifSaved && <p className="text-xs font-bold" style={{color:'var(--color-accent-text)'}}>Saved ♡</p>}
                 <div className="pt-3" style={{borderTop:'1px solid var(--color-border)'}}>
                   <p className="text-xs font-bold mb-1" style={{color:'var(--color-text-muted)'}}>Browser permission on this device</p>
                   {notifPermission === 'granted' && <p className="text-sm theme-text">✅ Pop-ups are allowed on this device ♡</p>}
@@ -486,7 +486,7 @@ export default function SettingsPage() {
                 <p className="text-xs leading-relaxed" style={{color:'var(--color-text-muted)'}}>
                   Your name, photo and online status are always visible, public or private. Privacy never hides your account — you always stay findable.
                 </p>
-                {privacySaved && <p className="text-xs font-bold" style={{color:'var(--color-accent)'}}>Saved ♡</p>}
+                {privacySaved && <p className="text-xs font-bold" style={{color:'var(--color-accent-text)'}}>Saved ♡</p>}
               </div>
               <div className="theme-card p-6 space-y-4">
                 <div className="flex items-center gap-2">
@@ -511,7 +511,7 @@ export default function SettingsPage() {
                     {lockerHasCode ? 'Change Code' : 'Set Code'}
                   </button>
                   {lockerHasCode && (
-                    <button onClick={()=>setShowRemoveLocker(true)} disabled={lockerBusy} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+                    <button onClick={()=>setShowRemoveLocker(true)} disabled={lockerBusy} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}>
                       Remove Code
                     </button>
                   )}
@@ -538,10 +538,10 @@ export default function SettingsPage() {
                 </div>
                 <button onClick={changePassword} disabled={pwSaving||newPw.length<8} className="theme-btn w-full py-2.5 text-sm">{pwSaving?'Updating...':'Update Password'}</button>
               </div>
-              <button onClick={logout} className="w-full p-4 rounded-2xl flex items-center gap-3 font-bold text-sm theme-card" style={{color:'#FF6B6B'}}>
+              <button onClick={logout} className="w-full p-4 rounded-2xl flex items-center gap-3 font-bold text-sm theme-card" style={{color:'var(--color-danger)'}}>
                 <LogOut size={18}/>Log Out
               </button>
-              <button onClick={deleteAccount} className="w-full p-4 rounded-2xl flex items-center gap-3 font-bold text-sm" style={{background:'rgba(255,107,107,0.08)',color:'#FF6B6B',border:'1px solid rgba(255,107,107,0.2)',borderRadius:16}}>
+              <button onClick={deleteAccount} className="w-full p-4 rounded-2xl flex items-center gap-3 font-bold text-sm" style={{background:'rgba(255,107,107,0.08)',color:'var(--color-danger)',border:'1px solid rgba(255,107,107,0.2)',borderRadius:16}}>
                 <Trash2 size={18}/>Delete Account
               </button>
             </div>
