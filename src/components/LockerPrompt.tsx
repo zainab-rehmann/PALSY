@@ -57,7 +57,7 @@ export default function LockerPrompt({
           />
         </div>
         {error && (
-          <p className="text-sm font-bold" style={{ color: '#FF6B6B' }}>
+          <p className="text-sm font-bold" style={{ color: 'var(--color-danger)' }}>
             {error}
           </p>
         )}
