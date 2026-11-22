@@ -1866,7 +1866,7 @@ export function WordleDuel({ game, state, profile, accentColor, canPlay, players
           ))}
           <div className="flex gap-1 justify-center">
             <button onClick={() => pressKey('⌫')} className="px-3 h-11 rounded-lg text-sm font-black transition-all hover:scale-105" style={{ background: 'rgba(var(--color-overlay-rgb),0.8)', color: 'var(--color-text)', border: `1px solid ${accentColor}33` }}>⌫</button>
-            <button onClick={() => pressKey('⏎')} disabled={current.length !== 5} className="px-4 h-11 rounded-lg text-sm font-black transition-all hover:scale-105" style={{ background: accentColor, color: '#fff', opacity: current.length !== 5 ? 0.5 : 1 }}>Enter ↵</button>
+            <button onClick={() => pressKey('⏎')} disabled={current.length !== 5} className="px-4 h-11 rounded-lg text-sm font-black transition-all hover:scale-105" style={{ background: accentColor, color: 'var(--color-on-accent)', opacity: current.length !== 5 ? 0.5 : 1 }}>Enter ↵</button>
           </div>
         </div>
       )}
