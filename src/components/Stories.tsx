@@ -209,8 +209,8 @@ export default function Stories({ profile }: { profile: Profile | null }) {
           <span className="relative w-14 h-14 rounded-full flex items-center justify-center"
             style={{ border: myStories.length > 0 ? '3px solid var(--color-accent)' : '3px dashed var(--color-border)', background: 'var(--color-secondary)' }}>
             <Avatar profile={profile} size={44} />
-            <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center text-white"
-              style={{ background: 'var(--color-accent)' }}>
+            <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center"
+              style={{ background: 'var(--color-accent)', color: 'var(--color-on-accent)' }}>
               <Plus size={12} strokeWidth={3} />
             </span>
           </span>
@@ -233,7 +233,7 @@ export default function Stories({ profile }: { profile: Profile | null }) {
       </div>
       <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={(e) => void pickFile(e)} />
       {uploading && <p className="text-xs font-bold mt-2" style={{ color: 'var(--color-text-muted)' }}>Uploading your story… ♡</p>}
-      {error && <p className="text-xs font-bold mt-2" style={{ color: '#FF6B6B' }}>{error}</p>}
+      {error && <p className="text-xs font-bold mt-2" style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
       {/* Composer — preview + optional caption, then post. */}
       {pending && (
@@ -255,8 +255,8 @@ export default function Stories({ profile }: { profile: Profile | null }) {
           />
           <div className="flex gap-2">
             <button onClick={() => void postStory()} disabled={posting}
-              className="flex-1 py-2.5 rounded-2xl text-sm font-black text-white transition-all hover:scale-[1.01]"
-              style={{ background: 'var(--color-accent)', opacity: posting ? 0.5 : 1 }}>
+              className="flex-1 py-2.5 rounded-2xl text-sm font-black transition-all hover:scale-[1.01]"
+              style={{ background: 'var(--color-accent)', color: 'var(--color-on-accent)', opacity: posting ? 0.5 : 1 }}>
               {posting ? 'Posting…' : 'Post story ♡'}
             </button>
             <button onClick={() => setPending(null)}
