@@ -79,7 +79,7 @@ export default function GamesPage() {
                   <div className="flex-1">
                     <p className="font-black theme-text">{g.name}</p>
                     <p className="text-xs mt-0.5 mb-2" style={{ color: 'var(--color-text-muted)' }}>{g.desc}</p>
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: 'var(--color-secondary)', color: 'var(--color-accent)' }}>{g.players}</span>
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: 'var(--color-secondary)', color: 'var(--color-accent-text)' }}>{g.players}</span>
                   </div>
                 </div>
               ))}
