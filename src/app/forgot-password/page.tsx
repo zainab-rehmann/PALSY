@@ -44,7 +44,7 @@ export default function ForgotPasswordPage() {
                 <h1 className="text-2xl font-black theme-text">Reset Password</h1>
                 <p className="text-sm mt-1" style={{color:'var(--color-text-muted)'}}>Enter your email and we'll send a reset link</p>
               </div>
-              {error && <div className="p-3 rounded-xl text-sm font-medium text-center" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>{error}</div>}
+              {error && <div className="p-3 rounded-xl text-sm font-medium text-center" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}>{error}</div>}
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="relative">
                   <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{color:'var(--color-text-muted)'}}/>
