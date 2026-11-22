@@ -872,7 +872,7 @@ async function addReaction(msgId: string, emoji: string) {
           <button onClick={()=>{setSelectMode(false); setSelectedIds(new Set());}} className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><X size={18} style={{color:'var(--color-accent)'}}/></button>
           <p className="font-black text-sm theme-text flex-1">{selectedIds.size} selected</p>
           <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-')).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}>Select all</button>
-          <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#FF6B6B',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
+          <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#C62828',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
         </header>
       ) : (
       <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)'}}>
@@ -901,7 +901,7 @@ async function addReaction(msgId: string, emoji: string) {
                 <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:'var(--color-accent)'}}/> Starred messages</button>
                 <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:'var(--color-accent)'}}/> Select messages</button>
                 <button onClick={toggleLock} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}>{isLocked?<LockOpen size={16} style={{color:'var(--color-accent)'}}/>:<Lock size={16} style={{color:'var(--color-accent)'}}/>} {isLocked?'Unlock chat':'Lock chat'}</button>
-                <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'#FF6B6B'}}><Trash2 size={16}/> Clear chat</button>
+                <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-danger)'}}><Trash2 size={16}/> Clear chat</button>
               </div>
             </>
           )}
@@ -910,15 +910,15 @@ async function addReaction(msgId: string, emoji: string) {
       )}
       {friend && isBirthdayToday(friend.birthday) && (
         <div className="flex-shrink-0 px-4 pt-3">
-          <div className="relative overflow-hidden rounded-2xl px-4 py-3 text-center" style={{ background: '#FFE3EE', border: '2px solid #FF9EBB' }}>
+          <div className="relative overflow-hidden rounded-2xl px-4 py-3 text-center" style={{ background: 'var(--color-secondary)', border: '2px solid var(--color-border)' }}>
             <BirthdayConfetti />
-            <p className="relative font-black text-sm" style={{ color: '#D6336C' }}>🎂 It&apos;s {friend.display_name || friend.username}&apos;s birthday today! ♡</p>
-            <p className="relative text-xs font-bold mt-0.5" style={{ color: '#D6336C' }}>Send them some love — it&apos;s their day!</p>
+            <p className="relative font-black text-sm" style={{ color: 'var(--color-text)' }}>🎂 It&apos;s {friend.display_name || friend.username}&apos;s birthday today! ♡</p>
+            <p className="relative text-xs font-bold mt-0.5" style={{ color: 'var(--color-text)' }}>Send them some love — it&apos;s their day!</p>
           </div>
         </div>
       )}
       {sendError && (
-        <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,107,107,0.12)',color:'#FF6B6B'}}>{sendError} <button onClick={()=>setSendError('')} className="underline ml-1">Dismiss</button></div>
+        <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'rgba(255,107,107,0.12)',color:'var(--color-danger)'}}>{sendError} <button onClick={()=>setSendError('')} className="underline ml-1">Dismiss</button></div>
       )}
       {jumpNote && (
         <div className="px-4 py-2 text-xs font-bold text-center flex-shrink-0" style={{background:'var(--color-secondary)',color:'var(--color-text-muted)'}}>{jumpNote} <button onClick={()=>setJumpNote('')} className="underline ml-1">Dismiss</button></div>
@@ -927,7 +927,7 @@ async function addReaction(msgId: string, emoji: string) {
         <button onClick={()=>{ const next = (pinIndex + 1) % pinnedList.length; setPinIndex(next); jumpToMessage(pinnedList[next].id); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:'var(--color-secondary)',borderBottom:'1px solid var(--color-border)'}}>
           <Pin size={14} style={{color:'var(--color-accent)'}} className="flex-shrink-0"/>
           <span className="text-xs font-bold truncate" style={{color:'var(--color-text)'}}>{senderName(pinnedCurrent, pinnedCurrent.sender_id === profile?.id ? 'You' : 'Friend')}: <span className="font-normal" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(pinnedCurrent)}</span></span>
-          {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:'var(--color-accent)'}}>{pinnedList.length} pinned · tap to cycle</span>}
+          {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:'var(--color-accent-text)'}}>{pinnedList.length} pinned · tap to cycle</span>}
         </button>
       )}
 
@@ -938,7 +938,7 @@ async function addReaction(msgId: string, emoji: string) {
             <span className="block font-black text-sm theme-text">{GAME_META[dmLiveGame.type]?.name || 'A game'} is live in this chat!</span>
             <span className="block text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>{dmLiveGame.created_by === profile?.id ? 'You started this game — jump back in.' : 'Your friend started this game — tap to play together.'}</span>
           </span>
-          <span className="px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0" style={{ background: dmAccent }}>Play</span>
+          <span className="px-3 py-1.5 rounded-full text-xs font-bold flex-shrink-0" style={{ background: dmAccent, color: 'var(--color-on-accent)' }}>Play</span>
         </button>
       )}
 
@@ -977,7 +977,7 @@ async function addReaction(msgId: string, emoji: string) {
               {divider}
             <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'} ${selected?'rounded-2xl':''}`} style={highlightId===msg.id?{background:'var(--color-secondary)',borderRadius:16,outline:'2px solid var(--color-accent)',outlineOffset:2}:selected?{background:'var(--color-secondary)'}:undefined} onClick={selectMode ? ()=>toggleSelect(msg.id) : undefined}>
               {selectMode && (
-                <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?'var(--color-accent)':'var(--color-border)',background:selected?'var(--color-accent)':'transparent',color:'#fff'}}>
+                <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?'var(--color-accent)':'var(--color-border)',background:selected?'var(--color-accent)':'transparent',color:'var(--color-on-accent)'}}>
                   {selected && <Check size={14}/>}
                 </button>
               )}
@@ -1003,7 +1003,7 @@ async function addReaction(msgId: string, emoji: string) {
                           <span className="text-xs italic" style={{color:'var(--color-text-muted)'}}>Message deleted</span>
                         ) : q ? (
                           <>
-                            <span className="block text-xs font-bold" style={{color:'var(--color-accent)'}}>↩ {senderName(q, q.sender_id === profile?.id ? 'You' : 'Friend')}</span>
+                            <span className="block text-xs font-bold" style={{color:'var(--color-text)'}}>↩ {senderName(q, q.sender_id === profile?.id ? 'You' : 'Friend')}</span>
                             <span className="block text-xs truncate" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(q)}</span>
                           </>
                         ) : (
@@ -1056,7 +1056,7 @@ async function addReaction(msgId: string, emoji: string) {
                           {msg.type==='text' && (
                             <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
                           )}
-                          <button onClick={()=>{deleteMessage(msg.id); setReactionMsg(null);}} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}><Trash2 size={12}/> Delete</button>
+                          <button onClick={()=>{deleteMessage(msg.id); setReactionMsg(null);}} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}><Trash2 size={12}/> Delete</button>
                         </div>
                       )}
                     </div>
@@ -1077,14 +1077,14 @@ async function addReaction(msgId: string, emoji: string) {
                   {msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:'var(--color-accent)'}}/>}
                   {starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}
                   {new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
-                  {msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'#FF6B6B'}}>Not sent · Tap to retry</button>}
+                  {msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'var(--color-danger)'}}>Not sent · Tap to retry</button>}
                   {mine && !msg.failed && (msg.read_at
-                    ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-accent)'}}><CheckCheck size={15}/> Seen</span>
+                    ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-text)'}}><CheckCheck size={15}/> Seen</span>
                     : msg.delivered_at
                       ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span>
                       : <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span>)}
                   {mine && msg.edited_at && <span className="ml-1 italic">· edited</span>}
-                  {mine && <button onClick={()=>deleteMessage(msg.id)} className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{color:'#FF6B6B'}}>Delete</button>}
+                  {mine && <button onClick={()=>deleteMessage(msg.id)} className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{color:'var(--color-danger)'}}>Delete</button>}
                 </span>
               </div>
             </div>
@@ -1104,7 +1104,7 @@ async function addReaction(msgId: string, emoji: string) {
       />
       {friendTyping && (
         <div className="px-4 py-1.5 text-xs flex-shrink-0" style={{background:'var(--color-surface)',color:'var(--color-text-muted)'}}>
-          <span className="font-semibold" style={{color:'var(--color-accent)'}}>{friend?.display_name || friend?.username || 'Your friend'}</span> is typing<span className="animate-pulse">…</span>
+          <span className="font-semibold" style={{color:'var(--color-accent-text)'}}>{friend?.display_name || friend?.username || 'Your friend'}</span> is typing<span className="animate-pulse">…</span>
         </div>
       )}
       {/* Input / Voice Bar */}
@@ -1115,7 +1115,7 @@ async function addReaction(msgId: string, emoji: string) {
             <span className="text-sm font-bold theme-text">Recording voice note... {recordTime}s</span>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={()=>stopRecording(false)} className="p-2.5 rounded-full" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}>
+            <button type="button" onClick={()=>stopRecording(false)} className="p-2.5 rounded-full" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}>
               <X size={18} />
             </button>
             <button type="button" onClick={()=>stopRecording(true)} className="theme-btn p-2.5 rounded-full">
@@ -1242,7 +1242,7 @@ async function addReaction(msgId: string, emoji: string) {
             ) : starredMessages.map(m=>(
               <button key={m.id} onClick={()=>{setShowStarred(false); jumpToMessage(m.id);}} className="w-full text-left px-3 py-2.5 rounded-2xl mb-1.5" style={{background:'var(--color-secondary)'}}>
                 <span className="flex items-baseline gap-2">
-                  <span className="text-xs font-bold" style={{color:'var(--color-accent)'}}>{senderName(m, m.sender_id===profile?.id?'You':'Friend')}</span>
+                  <span className="text-xs font-bold" style={{color:'var(--color-accent-text)'}}>{senderName(m, m.sender_id===profile?.id?'You':'Friend')}</span>
                   <span className="text-[11px]" style={{color:'var(--color-text-muted)'}}>{new Date(m.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short'})} {new Date(m.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
                 </span>
                 <span className="block text-sm truncate theme-text">{quoteSnippet(m)}</span>
@@ -1454,7 +1454,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
             <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{liveGame.created_by === profile.id ? 'You started this game — jump back in.' : 'Your friend started this game — open it and play together, live.'}</p>
           </div>
           <button onClick={() => { if (liveGame.created_by !== profile.id) joinGame(liveGame); else openGame(liveGame); }}
-            className="px-4 py-2 rounded-full text-xs font-bold text-white flex-shrink-0" style={{ background: accentColor }}>
+            className="px-4 py-2 rounded-full text-xs font-bold flex-shrink-0" style={{ background: accentColor, color: 'var(--color-on-accent)' }}>
             Open
           </button>
         </div>
@@ -1484,8 +1484,8 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
         <span className="text-xs ml-auto" style={{ color: 'var(--color-text-muted)' }}>{players.length} player{players.length === 1 ? '' : 's'} in</span>
         <SoundToggle userId={profile?.id}/>
         <button onClick={restartGame} disabled={!bothIn} title="Restart this game for both players"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white flex-shrink-0 transition-all"
-          style={{ background: accentColor, opacity: bothIn ? 1 : 0.45 }}>
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold flex-shrink-0 transition-all"
+          style={{ background: accentColor, color: 'var(--color-on-accent)', opacity: bothIn ? 1 : 0.45 }}>
           <RotateCcw size={13} /> Restart
         </button>
       </div>
