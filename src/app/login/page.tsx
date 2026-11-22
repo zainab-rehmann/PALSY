@@ -53,7 +53,7 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl text-sm font-medium text-center" style={{ background: 'rgba(255,107,107,0.1)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.2)' }}>
+            <div className="p-3 rounded-xl text-sm font-medium text-center" style={{ background: 'rgba(255,107,107,0.1)', color: 'var(--color-danger)', border: '1px solid rgba(255,107,107,0.2)' }}>
               {error}
             </div>
           )}
@@ -83,7 +83,7 @@ export default function LoginPage() {
             </div>
 
             <div className="flex justify-end">
-              <Link href="/forgot-password" className="text-xs font-semibold" style={{ color: 'var(--color-accent)' }}>Forgot password?</Link>
+              <Link href="/forgot-password" className="text-xs font-semibold" style={{ color: 'var(--color-accent-text)' }}>Forgot password?</Link>
             </div>
 
             <button type="submit" disabled={loading} className="theme-btn w-full py-3 text-sm flex items-center justify-center gap-2">
@@ -95,7 +95,7 @@ export default function LoginPage() {
 
           <p className="text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
             New here?{' '}
-            <Link href="/signup" className="font-bold" style={{ color: 'var(--color-accent)' }}>Create an account ♡</Link>
+            <Link href="/signup" className="font-bold" style={{ color: 'var(--color-accent-text)' }}>Create an account ♡</Link>
           </p>
         </div>
 
