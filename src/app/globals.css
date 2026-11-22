@@ -6,8 +6,11 @@
   --color-bg: #F5F9FF;
   --color-surface: #FFFFFF;
   --color-text: #34445C;
-  --color-text-muted: #6B7E9E;
+  --color-text-muted: #54678A;
   --color-accent: #7CA8E8;
+  --color-on-accent: #1F3350;
+  --color-accent-text: #3F63A8;
+  --color-danger: #C62828;
   --color-primary-alpha: rgba(169, 201, 245, 0.25);
   --color-accent-alpha: rgba(124, 168, 232, 0.15);
   --color-bubble-mine: #DCEBFF;
@@ -24,8 +27,11 @@
     --color-bg: #FFF9F0;
     --color-surface: #FFFFFF;
     --color-text: #4A2436;
-    --color-text-muted: #B07A90;
+    --color-text-muted: #8A5A70;
     --color-accent: #FF6B9D;
+    --color-on-accent: #4A2436;
+    --color-accent-text: #C2185B;
+    --color-danger: #AD1457;
     --color-primary-alpha: rgba(255, 173, 190, 0.28);
     --color-accent-alpha: rgba(255, 107, 157, 0.14);
     --color-bubble-mine: #FFDCE9;
@@ -44,6 +50,9 @@
   --color-text: #F7EBDD;
   --color-text-muted: #C9A98F;
   --color-accent: #E07B39;
+  --color-on-accent: #241811;
+  --color-accent-text: #E07B39;
+  --color-danger: #FFB3B3;
   --color-primary-alpha: rgba(232, 161, 92, 0.25);
   --color-accent-alpha: rgba(224, 123, 57, 0.18);
   --color-bubble-mine: #6B3F22;
@@ -191,7 +200,7 @@ body {
 
 .theme-btn {
   background-color: var(--color-accent);
-  color: white;
+  color: var(--color-on-accent);
   transition: all 0.2s ease;
   font-weight: 700;
   border-radius: 999px;
