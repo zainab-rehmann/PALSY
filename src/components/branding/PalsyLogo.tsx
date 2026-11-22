@@ -61,7 +61,7 @@ export function PalsyLogo({ iconSize = 36, textSize = 28, showTagline = false, c
       <div className="flex flex-col leading-none">
         <PalsyWordmark size={textSize}/>
         {showTagline && (
-          <span style={{ fontSize: 11, color: 'var(--color-accent)', fontWeight: 500, letterSpacing: '0.5px', marginTop: 2 }}>
+          <span style={{ fontSize: 11, color: 'var(--color-accent-text)', fontWeight: 500, letterSpacing: '0.5px', marginTop: 2 }}>
             your little corner of friendship. ♡
           </span>
         )}
