@@ -39,7 +39,7 @@ function MobileNav({ active }: { active: string }) {
       <div className="flex">
         {links.map(({href,icon:Icon,label})=>(
           <Link key={href} href={href} className="flex-1 flex flex-col items-center py-2.5 gap-1 transition-all"
-            style={{color:active===href?'var(--color-accent)':'var(--color-text-muted)'}}>
+            style={{color:active===href?'var(--color-accent-text)':'var(--color-text-muted)'}}>
             <Icon size={20}/>
             <span className="text-xs font-semibold">{label}</span>
           </Link>
@@ -78,7 +78,7 @@ function DesktopNav({ profile, active }: { profile: Profile|null; active: string
             className="flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm transition-all"
             style={{
               background:active===href?'var(--color-secondary)':'transparent',
-              color:active===href?'var(--color-accent)':'var(--color-text)',
+              color:active===href?'var(--color-accent-text)':'var(--color-text)',
             }}>
             <Icon size={18}/>{label}
           </Link>
@@ -95,7 +95,7 @@ function DesktopNav({ profile, active }: { profile: Profile|null; active: string
             </div>
           </div>
           <button onClick={logout} className="flex items-center gap-2 px-3 py-2 rounded-xl w-full text-sm font-semibold transition-all hover:opacity-80"
-            style={{color:'#FF6B6B',background:'rgba(255,107,107,0.08)'}}>
+            style={{color:'var(--color-danger)',background:'rgba(255,107,107,0.08)'}}>
             <LogOut size={16}/> Log Out
           </button>
         </div>
