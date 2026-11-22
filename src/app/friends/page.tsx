@@ -214,7 +214,7 @@ function FriendsContent() {
             {(['friends','search','requests'] as Tab[]).map(t=>(
               <button key={t} onClick={()=>setTab(t)}
                 className="flex-1 py-2 rounded-xl text-sm font-bold capitalize transition-all"
-                style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?'var(--color-accent)':'var(--color-text-muted)',boxShadow:tab===t?'0 2px 8px var(--color-primary-alpha)':undefined}}>
+                style={{background:tab===t?'var(--color-surface)':'transparent',color:tab===t?'var(--color-text)':'var(--color-text-muted)',boxShadow:tab===t?'0 2px 8px var(--color-primary-alpha)':undefined}}>
                 {t==='requests'?`Requests${requests.length>0?` (${requests.length})`:''}`:(t==='search'?'Find':t.charAt(0).toUpperCase()+t.slice(1))}
               </button>
             ))}
@@ -223,11 +223,11 @@ function FriendsContent() {
           {tab==='friends' && (
             <div>
               {friends.filter(f => isBirthdayToday(f.birthday)).length > 0 && (
-                <div className="theme-card p-4 mb-3 flex items-center gap-3" style={{ background: '#FFE3EE', border: '2px solid #FF9EBB' }}>
+                <div className="theme-card p-4 mb-3 flex items-center gap-3" style={{ background: 'var(--color-secondary)', border: '2px solid var(--color-border)' }}>
                   <span className="text-2xl">🎂</span>
                   <div className="flex-1 min-w-0">
-                    <p className="font-black text-sm" style={{ color: '#D6336C' }}>Birthdays today!</p>
-                    <p className="text-xs font-bold" style={{ color: '#D6336C' }}>
+                    <p className="font-black text-sm" style={{ color: 'var(--color-text)' }}>Birthdays today!</p>
+                    <p className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
                       {friends.filter(f => isBirthdayToday(f.birthday)).map(f => f.display_name || f.username).join(', ')} — send them some love ♡
                     </p>
                   </div>
@@ -249,7 +249,7 @@ function FriendsContent() {
                           <MessageCircle size={16} style={{color:'var(--color-accent)'}}/>
                         </Link>
                         <button onClick={()=>removeFriend(f.id)} className="p-2 rounded-xl transition-all" style={{background:'rgba(255,107,107,0.08)'}}>
-                          <UserMinus size={16} style={{color:'#FF6B6B'}}/>
+                          <UserMinus size={16} style={{color:'var(--color-danger)'}}/>
                         </button>
                       </div>
                     </div>
@@ -271,7 +271,7 @@ function FriendsContent() {
                 <button onClick={search} disabled={searching} className="theme-btn px-5 py-3 text-sm">{searching?'..':'Search'}</button>
               </div>
               {searchError && (
-                <p className="text-sm text-center font-semibold" style={{color:'#FF6B6B'}}>{searchError}</p>
+                <p className="text-sm text-center font-semibold" style={{color:'var(--color-danger)'}}>{searchError}</p>
               )}
               {searchResults.length>0 && (
                 <div className="space-y-2">
@@ -304,7 +304,7 @@ function FriendsContent() {
                         </div>
                         <div className="flex gap-2">
                           <button onClick={()=>respond(req.id,req.sender_id,true)} className="theme-btn p-2 rounded-xl"><Check size={16}/></button>
-                          <button onClick={()=>respond(req.id,req.sender_id,false)} className="p-2 rounded-xl" style={{background:'rgba(255,107,107,0.1)',color:'#FF6B6B'}}><X size={16}/></button>
+                          <button onClick={()=>respond(req.id,req.sender_id,false)} className="p-2 rounded-xl" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}><X size={16}/></button>
                         </div>
                       </div>
                     );
