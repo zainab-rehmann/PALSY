@@ -90,8 +90,8 @@ export default function NotificationBell({ variant }: { variant: 'icon' | 'navRo
   }
 
   const badge = unread > 0 ? (
-    <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center rounded-full text-white font-bold"
-      style={{ background: 'var(--color-accent)', fontSize: 10 }}>{unread > 9 ? '9+' : unread}</span>
+    <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center rounded-full font-bold"
+      style={{ background: 'var(--color-accent)', color: 'var(--color-on-accent)', fontSize: 10 }}>{unread > 9 ? '9+' : unread}</span>
   ) : null;
 
   return (
@@ -108,7 +108,7 @@ export default function NotificationBell({ variant }: { variant: 'icon' | 'navRo
           style={{ background: open ? 'var(--color-secondary)' : 'transparent', color: 'var(--color-text)' }}>
           <span className="relative"><Bell size={18} />{badge}</span>
           Notifications
-          {unread > 0 && <span className="ml-auto text-xs font-bold" style={{ color: 'var(--color-accent)' }}>{unread} new</span>}
+          {unread > 0 && <span className="ml-auto text-xs font-bold" style={{ color: 'var(--color-text)' }}>{unread} new</span>}
         </button>
       )}
       {variant === 'navItem' && (
@@ -144,10 +144,10 @@ export default function NotificationBell({ variant }: { variant: 'icon' | 'navRo
             <div className="flex items-center gap-2 px-1 pb-2">
               <p className="font-black text-sm theme-text flex-1">Notifications ♡</p>
               {unread > 0 && (
-                <button onClick={markAllRead} className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: 'var(--color-secondary)', color: 'var(--color-accent)' }}>Mark all read</button>
+                <button onClick={markAllRead} className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: 'var(--color-secondary)', color: 'var(--color-text)' }}>Mark all read</button>
               )}
               {items.length > 0 && (
-                <button onClick={() => setShowClearConfirm(true)} className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: 'rgba(255,107,107,0.1)', color: '#FF6B6B' }}>Clear</button>
+                <button onClick={() => setShowClearConfirm(true)} className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: 'rgba(255,107,107,0.1)', color: 'var(--color-danger)' }}>Clear</button>
               )}
             </div>
             {items.length === 0 ? (
