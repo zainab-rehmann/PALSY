@@ -7,7 +7,7 @@ import type { Profile, Room, RoomMember, Message, MessageReceipt, Game } from '@
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, CheckCheck, Hash, Lock, LockOpen,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3, Image as ImageIcon
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3, Image as ImageIcon, Plus
 } from 'lucide-react';
 import Link from 'next/link';
 import { GAME_META, initialStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel, SimonSays } from '@/components/GameComponents';
@@ -81,6 +81,10 @@ export default function RoomPage() {
   const [input, setInput] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
   const [showPoll, setShowPoll] = useState(false);
+  // "+" menu (composer): one button for Attachment + Poll, so the
+  // composer stays roomy on a phone. Both flows are unchanged — the menu
+  // just opens them.
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [actionMsg, setActionMsg] = useState<string|null>(null);
   const [editing, setEditing] = useState<Message|null>(null);
@@ -1284,6 +1288,19 @@ export default function RoomPage() {
                   <EmojiPicker onPick={(e)=>{setInput(prev=>prev+e); inputRef.current?.focus();}} />
                 </div>
               )}
+              {showPlusMenu && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={()=>setShowPlusMenu(false)} />
+                  <div className="absolute left-4 z-30 rounded-2xl p-1.5" style={{bottom:'calc(100% + 8px)',background:'var(--color-surface)',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
+                    <button type="button" onClick={()=>{setShowPlusMenu(false); fileInputRef.current?.click();}} className="flex items-center gap-2 w-full px-3 py-3 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}>
+                      <Paperclip size={16} style={{color:accentColor}}/> Attachment
+                    </button>
+                    <button type="button" onClick={()=>{setShowPlusMenu(false); setShowEmojis(false); setShowPoll(true);}} className="flex items-center gap-2 w-full px-3 py-3 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}>
+                      <BarChart3 size={16} style={{color:accentColor}}/> Poll
+                    </button>
+                  </div>
+                </>
+              )}
               {editing && (
                 <div className="absolute left-0 right-0 flex items-center gap-2 px-4 py-2 text-xs z-20" style={{bottom:'100%',background:`${accentColor}22`,borderTop:`1px solid ${accentColor}33`,color:'var(--color-text-muted)'}}>
                   <Pencil size={12}/>
@@ -1299,25 +1316,22 @@ export default function RoomPage() {
                 </div>
               )}
               <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip" className="hidden" onChange={handleRoomFileUpload}/>
-              <button type="button" disabled={uploading} onClick={() => fileInputRef.current?.click()} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background:`${accentColor}22`,color:accentColor}} title="Attach media">
-                <Paperclip size={18}/>
+              <button type="button" disabled={uploading} onClick={() => { setShowEmojis(false); setShowPlusMenu(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showPlusMenu ? accentColor : `${accentColor}22`, color: showPlusMenu ? 'white' : accentColor}} title="Add attachment or poll">
+                <Plus size={18}/>
               </button>
               <button type="button" onClick={isRecording ? stopRoomRecording : startRoomRecording} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: isRecording ? '#C62828' : `${accentColor}22`, color: isRecording ? 'white' : accentColor}} title={isRecording ? 'Stop recording' : 'Record voice message'}>
                 {isRecording ? <Square size={16}/> : <Mic size={18}/>}
               </button>
               {isRecording && <span className="text-xs font-bold flex-shrink-0" style={{color:'var(--color-danger)'}}>{Math.floor(recordTime/60)}:{String(recordTime%60).padStart(2,'0')}</span>}
-              <button type="button" onClick={() => setShowEmojis(v=>!v)} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showEmojis ? accentColor : `${accentColor}22`, color: showEmojis ? 'white' : accentColor}} title="Add emoji">
+              <button type="button" onClick={() => { setShowPlusMenu(false); setShowEmojis(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showEmojis ? accentColor : `${accentColor}22`, color: showEmojis ? 'white' : accentColor}} title="Add emoji">
                 <Smile size={18}/>
               </button>
-              <button type="button" onClick={() => { setShowEmojis(false); setShowPoll(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showPoll ? accentColor : `${accentColor}22`, color: showPoll ? 'white' : accentColor}} title="Ask a question (poll)">
-                <BarChart3 size={18}/>
-              </button>
               {showPoll && <PollForm accentColor={accentColor} onCreate={createPoll} onCancel={()=>setShowPoll(false)} />}
-              <textarea ref={inputRef} value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,100)+'px';}}
+              <textarea ref={inputRef} value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,160)+'px';}}
                 onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
                 placeholder="Say something nice... ♡" rows={1}
-                className="flex-1 py-3 px-4 rounded-2xl resize-none text-sm"
-                style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}44`,outline:'none',minHeight:44,maxHeight:100,fontFamily:"'Nunito',sans-serif"}}/>
+                className="flex-1 min-w-0 py-3 px-4 rounded-2xl resize-none text-sm"
+                style={{background:'rgba(var(--color-overlay-rgb),0.8)',border:`2px solid ${accentColor}44`,outline:'none',minHeight:52,maxHeight:160,fontFamily:"'Nunito',sans-serif"}}/>
               <button type="submit" disabled={!input.trim()} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-110" style={{background:accentColor,color:'var(--color-on-accent)'}}>
                 <Send size={16}/>
               </button>
