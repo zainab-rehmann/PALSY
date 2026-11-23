@@ -1606,16 +1606,16 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
           <span className="block text-xs font-semibold mt-1" style={{ color: 'var(--color-text-muted)' }}>The game starts when they open it — no invite needed.</span>
         </div>
       )}
-      {gameType === 'tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'hangman' && game && <Hangman game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'draw-guess' && game && <DrawGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      {gameType === 'checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'categories' && game && <CategoriesDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
       {gameType === 'simon-says' && game && <SimonSays game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
     </div>
