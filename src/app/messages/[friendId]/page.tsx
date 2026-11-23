@@ -15,6 +15,7 @@ import { CHAT_THEMES, getChatTheme, chatListStyle } from '@/lib/chatThemes';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import DeleteMessageDialog from '@/components/DeleteMessageDialog';
 import LockerPrompt from '@/components/LockerPrompt';
 import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel, SimonSays } from '@/components/GameComponents';
 import MediaGallery, { type GalleryItem } from '@/components/MediaGallery';
@@ -84,7 +85,27 @@ export default function DMPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showChatMenu, setShowChatMenu] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<'clear' | 'deleteSelected' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'clear' | null>(null);
+  // WhatsApp-style delete (migration 032): the dialog offers Delete for
+  // everyone (a "This message was deleted" note shows for both) or Delete
+  // for me (a marker row in message_deletions hides it only for the
+  // deleter). Cancel deletes nothing.
+  const [deleteTarget, setDeleteTarget] = useState<{ ids: string[] } | null>(null);
+  // Marker ids this user deleted "for me" — kept so realtime inserts of an
+  // already-hidden message are dropped too.
+  const hiddenForMeRef = useRef<Set<string>>(new Set());
+  async function filterHidden(msgs: Message[], userId: string): Promise<Message[]> {
+    if (!msgs.length) return msgs;
+    const supabase = createClient();
+    const { data } = await supabase.from('message_deletions').select('message_id').eq('user_id', userId).in('message_id', msgs.map(m=>m.id));
+    const hidden = new Set((data||[]).map((r:any)=>r.message_id));
+    hidden.forEach(id=>hiddenForMeRef.current.add(id));
+    return msgs.filter(m=>!hidden.has(m.id));
+  }
+  // Who may select a message: only your own (DMs have no owner/moderator).
+  function canSelect(msg: Message): boolean {
+    return msg.sender_id === profile?.id;
+  }
   const [sendError, setSendError] = useState('');
   // Chat locker (optional, personal): a locked chat shows only the code
   // prompt — messages are not even loaded until the code matches.
@@ -222,10 +243,11 @@ export default function DMPage() {
       const { data: msgs } = await supabase.from('messages')
         .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*),poll_votes:poll_votes(*)')
         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
-        .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .limit(CHAT_PAGE_SIZE);
-      const ordered = [...(msgs||[])].reverse();
+      // Deleted-for-everyone rows stay in the list as a placeholder note;
+      // rows this user deleted "for me" are hidden only for them.
+      const ordered = await filterHidden([...(msgs||[])].reverse(), user.id);
       setMessages(ordered);
       setHasMore((msgs||[]).length === CHAT_PAGE_SIZE);
       setLoading(false);
@@ -247,6 +269,7 @@ export default function DMPage() {
           const msg = payload.new as Message;
           if ((msg.sender_id===user.id&&msg.receiver_id===friendId)||(msg.sender_id===friendId&&msg.receiver_id===user.id)) {
             const { data: full } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').eq('id', msg.id).single();
+            if (full && hiddenForMeRef.current.has(full.id)) return;
             if (full && full.sender_id===friendId) {
               setFriendTyping(false);
               const now = new Date().toISOString();
@@ -260,7 +283,7 @@ export default function DMPage() {
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
           const upd = payload.new as Message;
           if (upd.is_deleted) {
-            setMessages(m=>m.filter(x=>x.id!==upd.id));
+            setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, is_deleted: true, content: null } : x));
           } else {
             setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, delivered_at: upd.delivered_at, read_at: upd.read_at, content: upd.content, edited_at: upd.edited_at, is_pinned: upd.is_pinned, pinned_at: upd.pinned_at, reply_to_id: upd.reply_to_id } : x));
           }
@@ -600,11 +623,10 @@ export default function DMPage() {
     const { data } = await supabase.from('messages')
       .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*),poll_votes:poll_votes(*)')
       .or(`and(sender_id.eq.${profile!.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile!.id})`)
-      .eq('is_deleted', false)
       .lt('created_at', before)
       .order('created_at', { ascending: false })
       .limit(CHAT_PAGE_SIZE);
-    return [...(data||[])].reverse() as Message[];
+    return filterHidden([...(data||[])].reverse() as Message[], profile!.id);
   }
 
   // Load an older page of history, keeping the scroll position steady.
@@ -670,16 +692,36 @@ export default function DMPage() {
     setConfirmAction(null);
   }
 
-  async function deleteSelected() {
-    if (!profile || selectedIds.size === 0) return;
+  // WhatsApp-style delete (migration 032): writes go through SECURITY
+  // DEFINER RPCs so the permission rules are enforced server-side.
+  async function deleteForEveryone(ids: string[]) {
+    if (!profile || ids.length === 0) return;
     const supabase = createClient();
-    const ids = [...selectedIds];
-    await supabase.from('messages').delete().in('id', ids);
-    setMessages(m=>m.filter(x=>!selectedIds.has(x.id)));
-    setReplyTo(null);
+    const results = await Promise.all(ids.map(async id=>{
+      const { data } = await supabase.rpc('delete_message_for_everyone', { p_message_id: id });
+      return { id, ok: !!data };
+    }));
+    const okIds = results.filter(r=>r.ok).map(r=>r.id);
+    if (okIds.length) setMessages(m=>m.map(x=>okIds.includes(x.id)?{...x,is_deleted:true,content:null}:x));
+    setDeleteTarget(null);
     setSelectedIds(new Set());
     setSelectMode(false);
-    setConfirmAction(null);
+  }
+  async function deleteForMe(ids: string[]) {
+    if (!profile || ids.length === 0) return;
+    const supabase = createClient();
+    const results = await Promise.all(ids.map(async id=>{
+      const { data } = await supabase.rpc('delete_message_for_me', { p_message_id: id });
+      return { id, ok: !!data };
+    }));
+    const okIds = results.filter(r=>r.ok).map(r=>r.id);
+    if (okIds.length) {
+      okIds.forEach(id=>hiddenForMeRef.current.add(id));
+      setMessages(m=>m.filter(x=>!okIds.includes(x.id)));
+    }
+    setDeleteTarget(null);
+    setSelectedIds(new Set());
+    setSelectMode(false);
   }
 
   function toggleSelect(id: string) {
@@ -755,12 +797,6 @@ async function addReaction(msgId: string, emoji: string) {
     } else {
       setSendError("Couldn't post that poll. Please try again.");
     }
-  }
-
-  async function deleteMessage(msgId: string) {
-    const supabase = createClient();
-    await supabase.from('messages').update({ is_deleted: true, content: null }).eq('id', msgId).eq('sender_id', profile!.id);
-    setMessages(m=>m.map(msg=>msg.id===msgId?{...msg,is_deleted:true,content:null}:msg));
   }
 
   // Long-press (touch) opens the same menu as right-click
@@ -914,8 +950,8 @@ async function addReaction(msgId: string, emoji: string) {
         <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)'}}>
           <button onClick={()=>{setSelectMode(false); setSelectedIds(new Set());}} className="p-2 rounded-xl" style={{background:'var(--color-secondary)'}}><X size={18} style={{color:'var(--color-accent)'}}/></button>
           <p className="font-black text-sm theme-text flex-1">{selectedIds.size} selected</p>
-          <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-')).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}>Select all</button>
-          <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#C62828',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
+          <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-') && canSelect(m)).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}>Select all</button>
+          <button onClick={()=>{ if (selectedIds.size>0) setDeleteTarget({ids:[...selectedIds]}); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#C62828',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
         </header>
       ) : (
       <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'var(--color-surface)',borderBottom:'1px solid var(--color-border)'}}>
@@ -1013,7 +1049,7 @@ async function addReaction(msgId: string, emoji: string) {
             <Fragment key={msg.id}>
               {divider}
               <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex ${mine?'justify-end':'justify-start'}`} style={highlightId===msg.id?{outline:'2px solid var(--color-accent)',outlineOffset:2,borderRadius:16}:undefined}>
-                <span className="text-xs italic px-3 py-1.5 rounded-2xl" style={{color:'var(--color-text-muted)',background:'var(--color-secondary)'}}>Message deleted</span>
+                <span className="text-xs italic px-3 py-1.5 rounded-2xl" style={{color:'var(--color-text-muted)',background:'var(--color-secondary)'}}>This message was deleted</span>
               </div>
             </Fragment>
           );
@@ -1021,8 +1057,8 @@ async function addReaction(msgId: string, emoji: string) {
           return (
             <Fragment key={msg.id}>
               {divider}
-            <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'} ${selected?'rounded-2xl':''}`} style={highlightId===msg.id?{background:'var(--color-secondary)',borderRadius:16,outline:'2px solid var(--color-accent)',outlineOffset:2}:selected?{background:'var(--color-secondary)'}:undefined} onClick={selectMode ? ()=>toggleSelect(msg.id) : undefined}>
-              {selectMode && (
+            <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex gap-2 ${mine?'flex-row-reverse':'flex-row'} ${selected?'rounded-2xl':''}`} style={highlightId===msg.id?{background:'var(--color-secondary)',borderRadius:16,outline:'2px solid var(--color-accent)',outlineOffset:2}:selected?{background:'var(--color-secondary)'}:undefined} onClick={selectMode && canSelect(msg) ? ()=>toggleSelect(msg.id) : undefined}>
+              {selectMode && canSelect(msg) && (
                 <button onClick={(e)=>{e.stopPropagation(); toggleSelect(msg.id);}} className="self-center flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center" style={{borderColor:selected?'var(--color-accent)':'var(--color-border)',background:selected?'var(--color-accent)':'transparent',color:'var(--color-on-accent)'}}>
                   {selected && <Check size={14}/>}
                 </button>
@@ -1103,7 +1139,7 @@ async function addReaction(msgId: string, emoji: string) {
                           {msg.type==='text' && (
                             <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
                           )}
-                          <button onClick={()=>{deleteMessage(msg.id); setReactionMsg(null);}} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}><Trash2 size={12}/> Delete</button>
+                          <button onClick={()=>{setDeleteTarget({ids:[msg.id]}); setReactionMsg(null);}} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}><Trash2 size={12}/> Delete</button>
                         </div>
                       )}
                     </div>
@@ -1131,7 +1167,7 @@ async function addReaction(msgId: string, emoji: string) {
                       ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span>
                       : <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span>)}
                   {mine && msg.edited_at && <span className="ml-1 italic">· edited</span>}
-                  {mine && <button onClick={()=>deleteMessage(msg.id)} className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{color:'var(--color-danger)'}}>Delete</button>}
+                  {mine && <button onClick={()=>setDeleteTarget({ids:[msg.id]})} className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs" style={{color:'var(--color-danger)'}}>Delete</button>}
                 </span>
               </div>
             </div>
@@ -1267,13 +1303,12 @@ async function addReaction(msgId: string, emoji: string) {
           onCancel={()=>setConfirmAction(null)}
         />
       )}
-      {confirmAction === 'deleteSelected' && (
-        <ConfirmDialog
-          title={`Delete ${selectedIds.size} message${selectedIds.size===1?'':'s'}?`}
-          message="These messages will be deleted for everyone in this chat. This cannot be undone."
-          confirmLabel="Delete"
-          onConfirm={deleteSelected}
-          onCancel={()=>setConfirmAction(null)}
+      {deleteTarget && (
+        <DeleteMessageDialog
+          count={deleteTarget.ids.length}
+          onEveryone={()=>deleteForEveryone(deleteTarget.ids)}
+          onForMe={()=>deleteForMe(deleteTarget.ids)}
+          onCancel={()=>setDeleteTarget(null)}
         />
       )}
       {showStarred && (
