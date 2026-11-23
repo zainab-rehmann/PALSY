@@ -5,13 +5,13 @@ import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen, Gamepad2, RotateCcw, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen, Gamepad2, RotateCcw, BarChart3, Palette } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
 import { isBirthdayToday } from '@/lib/birthday';
-import { wallpaperStyle } from '@/lib/wallpapers';
+import { CHAT_THEMES, getChatTheme, chatListStyle } from '@/lib/chatThemes';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
 import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -96,9 +96,35 @@ export default function DMPage() {
   const [dmLiveGame, setDmLiveGame] = useState<Game | null>(null);
   const [dmAccent, setDmAccent] = useState('#FF6B9D');
   const dmKey = profile ? `dm:${[profile.id, friendId].sort().join(':')}` : null;
+  // Per-chat theme (migration 031, Instagram-style): ONE shared theme per
+  // DM — either participant can change it, both see it instantly. 'default'
+  // means no chat theme: personal wallpaper + app theme, as before.
+  const [chatThemeId, setChatThemeId] = useState('default');
+  const chatThemeIdRef = useRef('default');
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  const chatTheme = getChatTheme(chatThemeId);
+  const chatThemeActive = chatThemeId !== 'default' && profile?.theme !== 'autumn';
+  function applyChatTheme(id: string) {
+    const t = getChatTheme(id);
+    chatThemeIdRef.current = id;
+    setChatThemeId(id);
+    if (id === 'default') {
+      const v = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim();
+      if (v) setDmAccent(v);
+    } else {
+      setDmAccent(t.accent);
+    }
+  }
+  async function setChatTheme(id: string) {
+    if (!dmKey) return;
+    const supabase = createClient();
+    const { data: ok, error } = await supabase.rpc('set_dm_chat_theme', { p_dm_key: dmKey, p_theme: id });
+    if (error || !ok) { alert('Could not save the chat theme. Please try again.'); return; }
+    applyChatTheme(id);
+  }
   useEffect(() => {
     const v = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim();
-    if (v) setDmAccent(v);
+    if (v && chatThemeIdRef.current === 'default') setDmAccent(v);
   }, [profile?.theme]);
   // Discover the DM's live game for the banner (polled; the panel itself
   // subscribes live while open). Nothing loads behind the locker gate.
@@ -200,6 +226,12 @@ export default function DMPage() {
       setHasMore((msgs||[]).length === CHAT_PAGE_SIZE);
       setLoading(false);
 
+      // Shared chat theme for this DM (migration 031): load the row for
+      // our dm_key; 'default'/missing means no theme (personal wallpaper).
+      const myDmKey = `dm:${[user.id, friendId].sort().join(':')}`;
+      const { data: themeRow } = await supabase.from('dm_chat_themes').select('theme').eq('dm_key', myDmKey).maybeSingle();
+      if (themeRow?.theme) applyChatTheme(themeRow.theme);
+
       // Chat is open -> everything from this friend counts as read
       await supabase.from('messages')
         .update({ read_at: new Date().toISOString(), delivered_at: new Date().toISOString() })
@@ -259,6 +291,13 @@ export default function DMPage() {
             const owner = messagesRef.current.find(m => (m.poll_votes || []).some(v => v.id === rid));
             if (owner) refreshPollVotes(owner.id);
           }
+        })
+        // Chat theme changes arrive live: when either of us picks a theme,
+        // the other side's chat re-themes without a reload. (No filter —
+        // the dm_key carries colons, so the row is matched in code.)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_chat_themes' }, (payload) => {
+          const row = payload.new as any;
+          if (row?.dm_key === myDmKey && typeof row.theme === 'string') applyChatTheme(row.theme);
         })
         .subscribe();
 
@@ -899,6 +938,7 @@ async function addReaction(msgId: string, emoji: string) {
                 <button onClick={exportChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:'var(--color-accent)'}}/> Export chat</button>
                 <button onClick={openGallery} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ImageIcon size={16} style={{color:'var(--color-accent)'}}/> Media gallery</button>
                 <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:'var(--color-accent)'}}/> Starred messages</button>
+                <button onClick={()=>{setShowChatMenu(false); setShowThemePicker(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Palette size={16} style={{color:'var(--color-accent)'}}/> Chat theme{chatThemeId!=='default' && <span className="ml-auto text-xs font-bold" style={{color:'var(--color-text-muted)'}}>{chatTheme.name}</span>}</button>
                 <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:'var(--color-accent)'}}/> Select messages</button>
                 <button onClick={toggleLock} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}>{isLocked?<LockOpen size={16} style={{color:'var(--color-accent)'}}/>:<Lock size={16} style={{color:'var(--color-accent)'}}/>} {isLocked?'Unlock chat':'Lock chat'}</button>
                 <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-danger)'}}><Trash2 size={16}/> Clear chat</button>
@@ -947,8 +987,10 @@ async function addReaction(msgId: string, emoji: string) {
       ) : (
       <>
       {/* Messages */}
-      {/* Messages — my own wallpaper, only I see it */}
-      <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
+      {/* Messages — a shared chat theme wins over my own wallpaper when one
+          is set (both of us see the same background); otherwise my own
+          wallpaper shows, only I see it. */}
+      <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={chatListStyle(chatThemeId, profile?.wallpaper, profile?.theme==='autumn')}>
         {hasMore && messages.length > 0 && (
           <div className="flex justify-center pb-1">
             <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'var(--color-secondary)',color:'var(--color-accent)',border:'1px solid var(--color-border)'}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
@@ -986,7 +1028,8 @@ async function addReaction(msgId: string, emoji: string) {
                 <div
                   className="px-4 py-2.5 rounded-2xl text-sm relative group cursor-pointer"
                   style={{
-                    background: mine?'var(--color-bubble-mine)':'var(--color-bubble-other)',
+                    background: mine ? (chatThemeActive ? chatTheme.bubbleMine : 'var(--color-bubble-mine)') : 'var(--color-bubble-other)',
+                    color: mine && chatThemeActive ? chatTheme.bubbleMineText : undefined,
                     border: mine?undefined:'1px solid var(--color-border)',
                     borderRadius: mine?'20px 20px 4px 20px':'20px 20px 20px 4px',
                   }}
@@ -1251,6 +1294,32 @@ async function addReaction(msgId: string, emoji: string) {
           </div>
         </>
       )}
+      {showThemePicker && (
+        <>
+          <div className="fixed inset-0 z-40" style={{background:'rgba(0,0,0,0.35)'}} onClick={()=>setShowThemePicker(false)}/>
+          <div className="fixed inset-x-4 top-20 z-50 mx-auto max-w-md rounded-3xl p-4 max-h-[70vh] overflow-y-auto" style={{background:'var(--color-surface)',border:'1px solid var(--color-border)',boxShadow:'0 12px 40px rgba(0,0,0,0.2)'}}>
+            <div className="flex items-center gap-2 mb-1">
+              <Palette size={18} style={{color:'var(--color-accent)'}}/>
+              <p className="font-black text-sm theme-text flex-1">Chat theme</p>
+              <button onClick={()=>setShowThemePicker(false)} className="p-1.5 rounded-full" style={{background:'var(--color-secondary)'}}><X size={14}/></button>
+            </div>
+            <p className="text-xs font-bold mb-3" style={{color:'var(--color-text-muted)'}}>Either of you can change it — it updates for both instantly ♡</p>
+            {CHAT_THEMES.map(t=>(
+              <button key={t.id} onClick={()=>{ void setChatTheme(t.id); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl mb-1.5 text-left" style={{background: t.id==='default' ? 'var(--color-secondary)' : t.background, border: chatThemeId===t.id ? `2px solid ${t.accent || 'var(--color-accent)'}` : '2px solid transparent'}}>
+                <span className="text-xl">{t.emoji}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-bold" style={{color: t.dark ? '#F1F5F9' : 'var(--color-text)'}}>{t.name}</span>
+                  <span className="block text-xs" style={{color: t.dark ? '#CBD5E1' : 'var(--color-text-muted)'}}>{t.id==='default' ? 'Your wallpaper + app theme' : 'Shared background + bubbles for both of you'}</span>
+                </span>
+                {chatThemeId===t.id && <Check size={16} style={{color: t.accent || 'var(--color-accent)'}}/>}
+              </button>
+            ))}
+            {profile?.theme==='autumn' && chatThemeId!=='default' && (
+              <p className="text-xs font-bold mt-2" style={{color:'var(--color-text-muted)'}}>You&apos;re in Autumn dark mode, so the dark page stays — the theme&apos;s accent colours still apply in this chat.</p>
+            )}
+          </div>
+        </>
+      )}
       {showGallery && (
         <MediaGallery
           items={galleryItems}
@@ -1510,4 +1579,3 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
     </div>
   );
 }
-
