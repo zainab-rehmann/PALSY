@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Message, Game } from '@/types';
 import { Avatar } from '@/components/layout/AppLayout';
-import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen, Gamepad2, RotateCcw, BarChart3, Palette } from 'lucide-react';
+import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen, Gamepad2, RotateCcw, BarChart3, Palette, Plus } from 'lucide-react';
 import Link from 'next/link';
 
 import EmojiPicker from '@/components/EmojiPicker';
@@ -35,6 +35,10 @@ export default function DMPage() {
   const [input, setInput] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
   const [showPoll, setShowPoll] = useState(false);
+  // "+" menu (composer): one button for Attachment + Poll, so the
+  // composer stays roomy on a phone. Both flows are unchanged — the menu
+  // just opens them.
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -1173,6 +1177,19 @@ async function addReaction(msgId: string, emoji: string) {
               <EmojiPicker onPick={(e)=>{setInput(prev=>prev+e); inputRef.current?.focus();}} />
             </div>
           )}
+          {showPlusMenu && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={()=>setShowPlusMenu(false)} />
+              <div className="absolute left-4 z-30 rounded-2xl p-1.5" style={{bottom:'calc(100% + 8px)',background:'var(--color-surface)',border:'1px solid var(--color-border)',boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
+                <button type="button" onClick={()=>{setShowPlusMenu(false); fileInputRef.current?.click();}} className="flex items-center gap-2 w-full px-3 py-3 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}>
+                  <Paperclip size={16} style={{color:'var(--color-accent)'}}/> Attachment
+                </button>
+                <button type="button" onClick={()=>{setShowPlusMenu(false); setShowEmojis(false); setShowPoll(true);}} className="flex items-center gap-2 w-full px-3 py-3 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}>
+                  <BarChart3 size={16} style={{color:'var(--color-accent)'}}/> Poll
+                </button>
+              </div>
+            </>
+          )}
           {editing && (
             <div className="absolute left-0 right-0 flex items-center gap-2 px-4 py-2 text-xs z-20" style={{bottom:'100%',background:'var(--color-secondary)',borderTop:'1px solid var(--color-border)',color:'var(--color-text-muted)'}}>
               <Pencil size={12}/>
@@ -1190,12 +1207,12 @@ async function addReaction(msgId: string, emoji: string) {
           <button
             type="button"
             disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => { setShowEmojis(false); setShowPlusMenu(v=>!v); }}
             className="p-3 rounded-full transition-all hover:scale-105"
-            style={{background:'var(--color-secondary)',color:'var(--color-accent)'}}
-            title="Attach file"
+            style={{background: showPlusMenu ? 'var(--color-accent)' : 'var(--color-secondary)', color: showPlusMenu ? '#fff' : 'var(--color-accent)'}}
+            title="Add attachment or poll"
           >
-            <Paperclip size={18} />
+            <Plus size={18} />
           </button>
 
           <button
@@ -1211,7 +1228,7 @@ async function addReaction(msgId: string, emoji: string) {
 
           <button
             type="button"
-            onClick={() => setShowEmojis(v=>!v)}
+            onClick={() => { setShowPlusMenu(false); setShowEmojis(v=>!v); }}
             className="p-3 rounded-full transition-all hover:scale-105"
             style={{background: showEmojis ? 'var(--color-accent)' : 'var(--color-secondary)', color: showEmojis ? '#fff' : 'var(--color-accent)'}}
             title="Add emoji"
@@ -1219,28 +1236,18 @@ async function addReaction(msgId: string, emoji: string) {
             <Smile size={18} />
           </button>
 
-          <button
-            type="button"
-            onClick={() => { setShowEmojis(false); setShowPoll(v=>!v); }}
-            className="p-3 rounded-full transition-all hover:scale-105"
-            style={{background: showPoll ? 'var(--color-accent)' : 'var(--color-secondary)', color: showPoll ? '#fff' : 'var(--color-accent)'}}
-            title="Ask a question (poll)"
-          >
-            <BarChart3 size={18} />
-          </button>
-
           {showPoll && <PollForm accentColor={dmAccent} onCreate={createPoll} onCancel={()=>setShowPoll(false)} />}
 
-          <div className="flex-1 relative">
+          <div className="flex-1 relative min-w-0">
             <textarea
               ref={inputRef}
-              value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px';}}
+              value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,160)+'px';}}
               onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(e as any);}}}
               placeholder={uploading ? "Uploading media..." : "Say something nice... ♡"}
               disabled={uploading}
               rows={1}
               className="theme-input w-full py-3 px-4 text-sm resize-none"
-              style={{minHeight:44,maxHeight:120}}
+              style={{minHeight:52,maxHeight:160}}
             />
           </div>
 
