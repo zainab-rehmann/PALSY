@@ -21,6 +21,7 @@ import { isBirthdayToday } from '@/lib/birthday';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
 import { notifyRoom, notifyGame } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import DeleteMessageDialog from '@/components/DeleteMessageDialog';
 import EntryCodePrompt from '@/components/EntryCodePrompt';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
 import { wallpaperStyle } from '@/lib/wallpapers';
@@ -131,7 +132,23 @@ export default function RoomPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showChatMenu, setShowChatMenu] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<'clear' | 'deleteSelected' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'clear' | null>(null);
+  // WhatsApp-style delete (migration 032): the dialog offers Delete for
+  // everyone (a "This message was deleted" note shows for all) or Delete
+  // for me (a marker row in message_deletions hides it only for the
+  // deleter). Cancel deletes nothing.
+  const [deleteTarget, setDeleteTarget] = useState<{ ids: string[] } | null>(null);
+  // Marker ids this user deleted "for me" — kept so realtime inserts of an
+  // already-hidden message are dropped too.
+  const hiddenForMeRef = useRef<Set<string>>(new Set());
+  async function filterHidden(msgs: Message[], userId: string): Promise<Message[]> {
+    if (!msgs.length) return msgs;
+    const supabase = createClient();
+    const { data } = await supabase.from('message_deletions').select('message_id').eq('user_id', userId).in('message_id', msgs.map(m=>m.id));
+    const hidden = new Set((data||[]).map((r:any)=>r.message_id));
+    hidden.forEach(id=>hiddenForMeRef.current.add(id));
+    return msgs.filter(m=>!hidden.has(m.id));
+  }
   const [sendError, setSendError] = useState('');
   // Reply / pin / star
   const [replyTo, setReplyTo] = useState<Message|null>(null);
@@ -257,10 +274,12 @@ export default function RoomPage() {
 
     const { data: msgs } = await supabase.from('messages')
       .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*),poll_votes:poll_votes(*)')
-      .eq('room_id', roomId).eq('is_deleted', false)
+      .eq('room_id', roomId)
       .order('created_at', { ascending: false })
       .limit(CHAT_PAGE_SIZE);
-    const ordered = [...(msgs||[])].reverse();
+    // Deleted-for-everyone rows stay in the list as a placeholder note;
+    // rows this user deleted "for me" are hidden only for them.
+    const ordered = await filterHidden([...(msgs||[])].reverse(), user.id);
     setMessages(ordered);
     setHasMore((msgs||[]).length === CHAT_PAGE_SIZE);
 
@@ -287,6 +306,7 @@ export default function RoomPage() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, async (payload) => {
         const { data: full } = await supabase.from('messages').select('*,sender:profiles!sender_id(*)').eq('id', payload.new.id).single();
         if (full) {
+          if (hiddenForMeRef.current.has(full.id)) return;
           setMessages(m=> m.some(x=>x.id===full.id) ? m : [...m, full]);
           // Room ticks: a message arriving while the room is open counts
           // as delivered; read too when the chat tab is in view.
@@ -301,7 +321,7 @@ export default function RoomPage() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
         const upd = payload.new as Message;
         if (upd.is_deleted) {
-          setMessages(m=>m.filter(x=>x.id!==upd.id));
+          setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, is_deleted: true, content: null } : x));
         } else {
           setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, content: upd.content, edited_at: upd.edited_at, is_pinned: upd.is_pinned, pinned_at: upd.pinned_at, reply_to_id: upd.reply_to_id } : x));
         }
@@ -546,11 +566,11 @@ export default function RoomPage() {
     const supabase = createClient();
     const { data } = await supabase.from('messages')
       .select('*,sender:profiles!sender_id(*),reactions:message_reactions(*),poll_votes:poll_votes(*)')
-      .eq('room_id', roomId).eq('is_deleted', false)
+      .eq('room_id', roomId)
       .lt('created_at', before)
       .order('created_at', { ascending: false })
       .limit(CHAT_PAGE_SIZE);
-    return [...(data||[])].reverse() as Message[];
+    return filterHidden([...(data||[])].reverse() as Message[], profile!.id);
   }
 
   // Load an older page of history, keeping the scroll position steady.
@@ -623,16 +643,40 @@ export default function RoomPage() {
     setConfirmAction(null);
   }
 
-  async function deleteRoomSelected() {
-    if (selectedIds.size === 0) return;
+  // WhatsApp-style delete (migration 032): writes go through SECURITY
+  // DEFINER RPCs so the permission rules are enforced server-side.
+  // Owners/moderators may delete any message for everyone; members only
+  // their own (canSelect gates the UI, the RPC gates the write).
+  async function deleteForEveryone(ids: string[]) {
+    if (ids.length === 0) return;
     const supabase = createClient();
-    const ids = [...selectedIds];
-    await supabase.from('messages').delete().in('id', ids);
-    setMessages(m=>m.filter(x=>!selectedIds.has(x.id)));
-    setReplyTo(null);
+    const results = await Promise.all(ids.map(async id=>{
+      const { data } = await supabase.rpc('delete_message_for_everyone', { p_message_id: id });
+      return { id, ok: !!data };
+    }));
+    const okIds = results.filter(r=>r.ok).map(r=>r.id);
+    if (okIds.length) setMessages(m=>m.map(x=>okIds.includes(x.id)?{...x,is_deleted:true,content:null}:x));
+    setDeleteTarget(null);
     setSelectedIds(new Set());
     setSelectMode(false);
-    setConfirmAction(null);
+    setActionMsg(null);
+  }
+  async function deleteForMe(ids: string[]) {
+    if (ids.length === 0) return;
+    const supabase = createClient();
+    const results = await Promise.all(ids.map(async id=>{
+      const { data } = await supabase.rpc('delete_message_for_me', { p_message_id: id });
+      return { id, ok: !!data };
+    }));
+    const okIds = results.filter(r=>r.ok).map(r=>r.id);
+    if (okIds.length) {
+      okIds.forEach(id=>hiddenForMeRef.current.add(id));
+      setMessages(m=>m.filter(x=>!okIds.includes(x.id)));
+    }
+    setDeleteTarget(null);
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setActionMsg(null);
   }
 
   function toggleSelect(id: string) {
@@ -847,13 +891,6 @@ export default function RoomPage() {
     if (msg.reply_to_id in quotedMap) return quotedMap[msg.reply_to_id];
     return undefined;
   }
-  async function deleteRoomMessage(msgId: string) {
-    const supabase = createClient();
-    await supabase.from('messages').update({ is_deleted: true, content: null }).eq('id', msgId).eq('sender_id', profile!.id);
-    setMessages(m=>m.filter(x=>x.id!==msgId));
-    setActionMsg(null);
-  }
-
   async function uploadRoomPic(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !profile || !room) return;
@@ -1081,7 +1118,7 @@ export default function RoomPage() {
           <button onClick={()=>{setSelectMode(false); setSelectedIds(new Set());}} className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}><X size={18} style={{color:accentColor}}/></button>
           <p className="font-black text-sm theme-text flex-1">{selectedIds.size} selected</p>
           <button onClick={()=>setSelectedIds(new Set(messages.filter(m=>!m.is_deleted && !m.id.startsWith('temp-') && canSelect(m)).map(m=>m.id)))} className="text-xs font-bold px-3 py-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)',color:'var(--color-text)'}}>Select all</button>
-          <button onClick={()=>{ if (selectedIds.size>0) setConfirmAction('deleteSelected'); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#C62828',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
+          <button onClick={()=>{ if (selectedIds.size>0) setDeleteTarget({ids:[...selectedIds]}); }} disabled={selectedIds.size===0} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{background:'#C62828',opacity:selectedIds.size===0?0.5:1}}><Trash2 size={14}/> Delete</button>
         </header>
       ) : (
       <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(var(--color-overlay-rgb),0.4)'}}>
@@ -1174,6 +1211,14 @@ export default function RoomPage() {
                 ) : null;
                 const selected = selectedIds.has(msg.id);
                 const selectable = canSelect(msg);
+                if (msg.is_deleted) return (
+                  <Fragment key={msg.id}>
+                    {divider}
+                    <div ref={el=>{ msgRefs.current[msg.id]=el; }} className={`flex ${mine?'justify-end':'justify-start'}`} style={highlightId===msg.id?{outline:`2px solid ${accentColor}`,outlineOffset:2,borderRadius:16}:undefined}>
+                      <span className="text-xs italic px-3 py-1.5 rounded-2xl" style={{color:'var(--color-text-muted)',background:'rgba(var(--color-overlay-rgb),0.9)'}}>This message was deleted</span>
+                    </div>
+                  </Fragment>
+                );
                 return (
                   <Fragment key={msg.id}>
                     {divider}
@@ -1248,10 +1293,12 @@ export default function RoomPage() {
                               <button onClick={()=>toggleStar(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Star size={12}/> {starredIds.has(msg.id)?'Unstar':'Star'}</button>
                               <button onClick={()=>setActionMsg(null)} className="text-xs p-1"><X size={12}/></button>
                             </div>
-                            {mine && msg.type !== 'poll' && (
+                            {(mine || myRole==='owner' || myRole==='moderator') && msg.type !== 'poll' && (
                               <div className="flex gap-1 pt-1" style={{borderTop:`1px solid ${accentColor}33`}}>
-                                <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
-                                <button onClick={()=>deleteRoomMessage(msg.id)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}><Trash2 size={12}/> Delete</button>
+                                {mine && (
+                                  <button onClick={()=>startEdit(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Pencil size={12}/> Edit</button>
+                                )}
+                                <button onClick={()=>{setDeleteTarget({ids:[msg.id]}); setActionMsg(null);}} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'rgba(255,107,107,0.1)',color:'var(--color-danger)'}}><Trash2 size={12}/> Delete</button>
                               </div>
                             )}
                           </div>
@@ -1500,13 +1547,12 @@ export default function RoomPage() {
           onCancel={()=>setConfirmAction(null)}
         />
       )}
-      {confirmAction === 'deleteSelected' && (
-        <ConfirmDialog
-          title={`Delete ${selectedIds.size} message${selectedIds.size===1?'':'s'}?`}
-          message="These messages will be deleted for everyone in this room. This cannot be undone."
-          confirmLabel="Delete"
-          onConfirm={deleteRoomSelected}
-          onCancel={()=>setConfirmAction(null)}
+      {deleteTarget && (
+        <DeleteMessageDialog
+          count={deleteTarget.ids.length}
+          onEveryone={()=>deleteForEveryone(deleteTarget.ids)}
+          onForMe={()=>deleteForMe(deleteTarget.ids)}
+          onCancel={()=>setDeleteTarget(null)}
         />
       )}
       {showStarred && (
