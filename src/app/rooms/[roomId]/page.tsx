@@ -1410,7 +1410,7 @@ export default function RoomPage() {
           </div>
         )}
 
-        {tab==='games' && <GamesTab roomId={roomId} profile={profile} accentColor={accentColor}/>}
+        {tab==='games' && <GamesTab roomId={roomId} profile={profile} accentColor={accentColor} members={members}/>}
 
         {tab==='settings' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -1602,7 +1602,7 @@ export default function RoomPage() {
 
 // Draw & Guess word bank: every word is drawable — animals, food and
 // everyday things. The hint shown to the guesser is the category.
-function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: Profile|null; accentColor: string }) {
+function GamesTab({ roomId, profile, accentColor, members }: { roomId: string; profile: Profile|null; accentColor: string; members: any[] }) {
   const [gameType, setGameType] = useState<string|null>(null);
   const [game, setGame] = useState<Game|null>(null);
   const [gameState, setGameState] = useState<any>(null);
@@ -1613,6 +1613,11 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
 
 
   const bothIn = players.length >= 2;
+
+  // Turn labels show the other player's name (display name, else username).
+  const otherPlayerId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
+  const opponentMember = otherPlayerId ? (members || []).find((m: any) => m.user_id === otherPlayerId) : null;
+  const opponentName = opponentMember?.profile?.display_name || opponentMember?.profile?.username || 'Friend';
 
   async function refreshPlayers(gameId: string) {
     const supabase = createClient();
@@ -1809,16 +1814,16 @@ function GamesTab({ roomId, profile, accentColor }: { roomId: string; profile: P
           <span className="block text-xs font-semibold mt-1" style={{color:'var(--color-text-muted)'}}>The game starts when both players are in.</span>
         </div>
       )}
-      {gameType==='tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='hangman' && game && <Hangman game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='draw-guess' && game && <DrawGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      {gameType==='checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='categories' && game && <CategoriesDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
       {gameType==='simon-says' && game && <SimonSays game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
     </div>
