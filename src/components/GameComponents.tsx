@@ -405,8 +405,9 @@ export const GAME_META: Record<string,{emoji:string;name:string;desc:string}> = 
   'simon-says': { emoji:'🎵', name:'Simon Says', desc:'2 players' },
 };
 
-export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate }: any) {
+export function TicTacToe({ game, state, profile, accentColor, canPlay, players, opponentName, onUpdate }: any) {
   const myTurn = state.currentPlayer === profile?.id;
+  const oppName = opponentName || 'Friend';
   useWinnerSound(state.winner === 'draw' ? 'draw' : state.winner?.player ?? null, profile?.id);
   useTurnSound(myTurn, canPlay && !state.winner);
   async function makeMove(idx: number) {
@@ -443,7 +444,7 @@ export function TicTacToe({ game, state, profile, accentColor, canPlay, onUpdate
       ) : !canPlay ? (
         <p className="text-sm font-bold text-center theme-text">Waiting for the second player to join…</p>
       ) : (
-        <p className="text-sm font-bold text-center theme-text">{myTurn?'Your turn! ✨':'Waiting for other player...'}</p>
+        <p className="text-sm font-bold text-center theme-text">{myTurn ? 'Your turn! ✨' : `${oppName}'s turn…`}</p>
       )}
       <div className="grid grid-cols-3 gap-2 max-w-xs mx-auto">
         {state.board.map((cell: any, i: number)=>(
@@ -1394,7 +1395,7 @@ const DOTS_ALL_EDGES: string[] = (() => {
   return list;
 })();
 
-export function DotsBoxes({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+export function DotsBoxes({ game, state, profile, accentColor, canPlay, players, opponentName, onUpdate }: any) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || null;
@@ -1406,6 +1407,7 @@ export function DotsBoxes({ game, state, profile, accentColor, canPlay, players,
   const myScore = scores[profile?.id] || 0;
   const theirScore = otherId ? (scores[otherId] || 0) : 0;
   const myTurn = state.turn === profile?.id;
+  const oppName = opponentName || 'Friend';
   const myInitial = ((profile?.display_name || profile?.username || 'Y')[0] || 'Y').toUpperCase();
   const claimedCount = Object.keys(boxes).length;
   const lastClaimed: number = state.lastClaimed || 0;
@@ -1460,7 +1462,7 @@ export function DotsBoxes({ game, state, profile, accentColor, canPlay, players,
       </div>
       {!finished && (
         <p className="text-center font-black theme-text">
-          {canPlay ? (myTurn ? 'Your turn — tap an edge ♡' : "Friend's turn…") : 'Waiting for your friend to join…'}
+          {canPlay ? (myTurn ? 'Your turn — tap an edge ♡' : `${oppName}'s turn…`) : 'Waiting for your friend to join…'}
         </p>
       )}
       {!finished && lastClaimed > 0 && lastMoveBy && (
@@ -1520,7 +1522,7 @@ export function DotsBoxes({ game, state, profile, accentColor, canPlay, players,
 }
 
 
-export function CrazyEights({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+export function CrazyEights({ game, state, profile, accentColor, canPlay, players, opponentName, onUpdate }: any) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const [suitFor, setSuitFor] = useState<string | null>(null);
@@ -1534,6 +1536,7 @@ export function CrazyEights({ game, state, profile, accentColor, canPlay, player
   const top = discard[discard.length - 1] || null;
   const deck: string[] = state.deck || [];
   const myTurn = state.turn === profile?.id;
+  const oppName = opponentName || 'Friend';
   const currentSuit: string = state.currentSuit || (top ? ceSuit(top) : 'S');
   useWinnerSound(state.winner, profile?.id);
   useTurnSound(myTurn, canPlay && !finished);
@@ -1645,7 +1648,7 @@ export function CrazyEights({ game, state, profile, accentColor, canPlay, player
 
       {!finished && (
         <p className="text-center font-black theme-text">
-          {canPlay ? (myTurn ? 'Your turn — play a matching card ♡' : "Friend's turn…") : 'Waiting for your friend to join…'}
+          {canPlay ? (myTurn ? 'Your turn — play a matching card ♡' : `${oppName}'s turn…`) : 'Waiting for your friend to join…'}
         </p>
       )}
 
@@ -1880,7 +1883,7 @@ export function WordleDuel({ game, state, profile, accentColor, canPlay, players
 // to see where it can go, tap a highlighted square to move there.
 // Jumps are mandatory and chain while another capture is open.
 const CHECKERS_OPP = '#8D5A2B'; // warm brown opponent pieces (solid colour)
-export function Checkers({ game, state, profile, accentColor, canPlay, players, onUpdate }: any) {
+export function Checkers({ game, state, profile, accentColor, canPlay, players, opponentName, onUpdate }: any) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const [selected, setSelected] = useState<number | null>(null);
@@ -1889,6 +1892,7 @@ export function Checkers({ game, state, profile, accentColor, canPlay, players, 
   const mySide: 0 | 1 | null = seats[0] === profile?.id ? 0 : seats[1] === profile?.id ? 1 : null;
   const otherId = (players || []).find((p: any) => p.user_id !== profile?.id)?.user_id || seats[mySide === 0 ? 1 : 0] || null;
   const myTurn = state.turn === profile?.id;
+  const oppName = opponentName || 'Friend';
   const finished = state.phase === 'finished';
   const myPieces = mySide === null ? 0 : checkersCountPieces(board, mySide);
   const theirPieces = mySide === null ? 0 : checkersCountPieces(board, (mySide === 0 ? 1 : 0) as 0 | 1);
@@ -1948,7 +1952,7 @@ export function Checkers({ game, state, profile, accentColor, canPlay, players, 
       </div>
       {!finished && (
         <p className="text-center font-black theme-text">
-          {canPlay ? (myTurn ? (mustJumpFrom !== null ? 'Jump again — you must keep capturing! ♡' : 'Your turn — tap one of your pieces ♡') : "Friend's turn…") : 'Waiting for your friend to join…'}
+          {canPlay ? (myTurn ? (mustJumpFrom !== null ? 'Jump again — you must keep capturing! ♡' : 'Your turn — tap one of your pieces ♡') : `${oppName}'s turn…`) : 'Waiting for your friend to join…'}
         </p>
       )}
       <div className="w-full max-w-sm mx-auto rounded-2xl p-2" style={{ background: '#F5E6D3' }}>
