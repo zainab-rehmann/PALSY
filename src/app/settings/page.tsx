@@ -391,7 +391,8 @@ export default function SettingsPage() {
                     <p className="text-[11px] font-bold py-1.5 theme-text">🖼️ Your photo{isCustomWallpaper(wallpaper) && <Check size={12} className="inline ml-1" style={{color:'var(--color-accent)'}}/>}</p>
                   </button>
                 </div>
-                <input ref={wallpaperInputRef} type="file" accept="image/*" className="hidden" onChange={uploadWallpaper}/>
+                {/* Kept rendered (NOT display:none) — iOS Safari ignores clicks on display:none inputs */}
+                <input ref={wallpaperInputRef} type="file" accept="image/*" className="absolute h-px w-px opacity-0 overflow-hidden" onChange={uploadWallpaper}/>
                 {/* Live preview */}
                 <div className="mt-4 rounded-2xl overflow-hidden" style={{border:'1px solid var(--color-border)'}}>
                   <div className="px-4 py-3 space-y-2" style={wallpaperStyle(wallpaper, theme==='autumn')}>
