@@ -1,8 +1,8 @@
 // PALSY — per-chat themes, Instagram-style (2-week plan, Mon 2026-11-23).
 // One theme sets the chat background + own-bubble colour + accent together.
 // A DM's theme is SHARED: either participant can change it and both see it
-// instantly (stored in dm_chat_themes, migration 031). Rooms get the same
-// gallery on Tue 2026-11-24.
+// instantly (stored in dm_chat_themes, migration 031). Rooms share the
+// same gallery (stored on the rooms row, migration 033).
 //
 // Colours are solid theme tokens only — gradients are built from colour
 // stops, no blur/glow/transparency (her standing rule). 'default' means
