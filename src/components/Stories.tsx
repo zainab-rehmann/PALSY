@@ -231,7 +231,8 @@ export default function Stories({ profile }: { profile: Profile | null }) {
           );
         })}
       </div>
-      <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={(e) => void pickFile(e)} />
+      {/* Kept rendered (NOT display:none) — iOS Safari ignores clicks on display:none inputs */}
+      <input ref={fileRef} type="file" accept="image/*,video/*" className="absolute h-px w-px opacity-0 overflow-hidden" onChange={(e) => void pickFile(e)} />
       {uploading && <p className="text-xs font-bold mt-2" style={{ color: 'var(--color-text-muted)' }}>Uploading your story… ♡</p>}
       {error && <p className="text-xs font-bold mt-2" style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
