@@ -7,7 +7,7 @@ import type { Profile, Room, RoomMember, Message, MessageReceipt, Game } from '@
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, CheckCheck, Hash, Lock, LockOpen,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3, Image as ImageIcon, Plus
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Palette, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3, Image as ImageIcon, Plus
 } from 'lucide-react';
 import Link from 'next/link';
 import { GAME_META, initialStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel, SimonSays } from '@/components/GameComponents';
@@ -24,7 +24,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import DeleteMessageDialog from '@/components/DeleteMessageDialog';
 import EntryCodePrompt from '@/components/EntryCodePrompt';
 import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/entryCode';
-import { wallpaperStyle } from '@/lib/wallpapers';
+import { CHAT_THEMES, getChatTheme, chatListStyle } from '@/lib/chatThemes';
 import LockerPrompt from '@/components/LockerPrompt';
 import SoundToggle from '@/components/SoundToggle';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
@@ -383,6 +383,15 @@ export default function RoomPage() {
           const owner = messagesRef.current.find(m => (m.poll_votes || []).some(v => v.id === rid));
           if (owner) refreshPollVotes(owner.id);
         }
+      })
+      // Room theme/picture changes arrive live: when any member picks a
+      // chat theme, a solid preset or a new room picture, everyone in the
+      // room re-themes without a reload. (rooms is in the realtime
+      // publication since migration 033; the id filter scopes it here.)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, (payload) => {
+        const row = payload.new as Room;
+        if (!row?.id) return;
+        setRoom(prev => prev ? { ...prev, chat_theme: row.chat_theme ?? prev.chat_theme, preset: row.preset ?? prev.preset, accent_color: row.accent_color ?? prev.accent_color, avatar_url: row.avatar_url ?? prev.avatar_url } : prev);
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -918,6 +927,20 @@ export default function RoomPage() {
     setRoom({ ...room, preset: key, accent_color: p.accent });
   }
 
+  // Per-room chat theme (migration 033, Instagram-style): ONE shared
+  // gradient theme per room — any member can change it, all members see
+  // it instantly. 'default' means no chat theme: the solid preset +
+  // personal wallpaper show, as before.
+  async function setChatTheme(id: string) {
+    if (!room) return;
+    const supabase = createClient();
+    // Any member may change the room chat theme: the RPC checks
+    // membership and validates the theme id (same rule as the presets).
+    const { data: ok, error } = await supabase.rpc('set_room_chat_theme', { p_room_id: roomId, p_chat_theme: id });
+    if (error || !ok) { alert('Could not save the chat theme. Please try again.'); return; }
+    setRoom({ ...room, chat_theme: id });
+  }
+
   async function toggleMute() {
     if (!profile) return;
     const supabase = createClient();
@@ -1075,7 +1098,15 @@ export default function RoomPage() {
   if (!room) return null;
 
   const preset = room.preset ? PRESETS[room.preset] : null;
-  const accentColor = preset?.accent || room.accent_color || 'var(--color-accent)';
+  // Per-room chat theme (migration 033): one shared gradient theme per
+  // room. When one is picked it sets the list background, own-bubble
+  // colour and accent together; 'default' means no chat theme — the
+  // solid preset + personal wallpaper show, as before. In Autumn dark
+  // mode the dark page wins and only the theme accent applies (same rule
+  // as DMs, from the 2026-11-22 dark-mode fix).
+  const chatTheme = getChatTheme(room.chat_theme);
+  const chatThemeActive = (room.chat_theme || 'default') !== 'default' && profile?.theme !== 'autumn';
+  const accentColor = chatThemeActive ? chatTheme.accent : (preset?.accent || room.accent_color || 'var(--color-accent)');
   // Dark (autumn) theme wins over the room's light preset background,
   // so rooms stay readable; the preset accent colour is kept.
   const pageBg = profile?.theme === 'autumn' ? 'var(--color-bg)' : (preset?.bg || 'var(--color-bg)');
@@ -1144,6 +1175,7 @@ export default function RoomPage() {
                   <button onClick={exportRoomChat} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Download size={16} style={{color:accentColor}}/> Export chat</button>
                   <button onClick={openGallery} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ImageIcon size={16} style={{color:accentColor}}/> Media gallery</button>
                   <button onClick={openStarred} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Star size={16} style={{color:accentColor}}/> Starred messages</button>
+                  <button onClick={()=>{setShowChatMenu(false); setTab('settings');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><Palette size={16} style={{color:accentColor}}/> Chat theme{(room.chat_theme||'default')!=='default' && <span className="ml-auto text-xs font-bold" style={{color:'var(--color-text-muted)'}}>{chatTheme.name}</span>}</button>
                   <button onClick={()=>{setShowChatMenu(false); setSelectMode(true);}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)'}}><ListChecks size={16} style={{color:accentColor}}/> Select messages</button>
                   {(myRole==='owner'||myRole==='moderator') && (
                     <button onClick={()=>{setShowChatMenu(false); setConfirmAction('clear');}} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-danger)'}}><Trash2 size={16}/> Clear chat</button>
@@ -1184,8 +1216,8 @@ export default function RoomPage() {
                 {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:accentColor}}>{pinnedList.length} pinned · tap to cycle</span>}
               </button>
             )}
-            {/* Messages — my own wallpaper, only I see it */}
-            <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={wallpaperStyle(profile?.wallpaper, profile?.theme==='autumn')}>
+            {/* Messages — a shared chat theme wins over my own wallpaper; with no theme, my wallpaper shows as before */}
+            <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={chatListStyle(room.chat_theme, profile?.wallpaper, profile?.theme==='autumn')}>
               {hasMore && messages.length > 0 && (
                 <div className="flex justify-center pb-1">
                   <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'rgba(var(--color-overlay-rgb),0.9)',color:accentColor,border:`1px solid ${accentColor}33`}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
@@ -1232,7 +1264,7 @@ export default function RoomPage() {
                     <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-0.5`}>
                       {!mine && <span className="text-xs font-bold px-1" style={{color:accentColor}}>{sender?.display_name||sender?.username}</span>}
                       <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
-                        style={{background:mine?accentColor+22:'rgba(var(--color-overlay-rgb),0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:'var(--color-text)'}}
+                        style={{background:mine?(chatThemeActive?chatTheme.bubbleMine:accentColor+22):'rgba(var(--color-overlay-rgb),0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:mine&&chatThemeActive?chatTheme.bubbleMineText:'var(--color-text)'}}
                         onContextMenu={e=>{if(!selectMode){e.preventDefault();setMenuBelow(e.clientY < 240);setActionMsg(msg.id);}}}
                         onTouchStart={(e)=>{if(!selectMode) startPress(msg.id, e.touches[0]?.clientY);}} onTouchEnd={endPress} onTouchMove={endPress}
                         onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}>
@@ -1441,6 +1473,22 @@ export default function RoomPage() {
                     <div className="text-[11px] font-bold capitalize" style={{color:'var(--color-text)'}}>{key.replace('-',' ')}</div>
                   </button>
                 ))}
+              </div>
+              <div className="pt-1">
+                <p className="text-xs font-bold mb-2" style={{color:'var(--color-text-muted)'}}>Chat theme — gradient background + bubbles for everyone</p>
+                {CHAT_THEMES.map(t=>(
+                  <button key={t.id} onClick={()=>{ void setChatTheme(t.id); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl mb-1.5 text-left" style={{background: t.id==='default' ? 'var(--color-secondary)' : t.background, border: (room.chat_theme||'default')===t.id ? `2px solid ${t.accent || accentColor}` : '2px solid transparent'}}>
+                    <span className="text-xl">{t.emoji}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-bold" style={{color: t.dark ? '#F1F5F9' : 'var(--color-text)'}}>{t.name}</span>
+                      <span className="block text-xs" style={{color: t.dark ? '#CBD5E1' : 'var(--color-text-muted)'}}>{t.id==='default' ? 'Solid preset + your wallpaper' : 'Shared gradient background + bubbles'}</span>
+                    </span>
+                    {(room.chat_theme||'default')===t.id && <Check size={16} style={{color: t.accent || accentColor}}/>}
+                  </button>
+                ))}
+                {profile?.theme==='autumn' && (room.chat_theme||'default')!=='default' && (
+                  <p className="text-xs font-bold mt-2" style={{color:'var(--color-text-muted)'}}>You&apos;re in Autumn dark mode, so the dark page stays — the theme&apos;s accent colours still apply in this room.</p>
+                )}
               </div>
               <p className="text-xs" style={{color:'var(--color-text-muted)'}}>Anyone in this room can change the theme — it updates for everyone ♡</p>
             </div>
