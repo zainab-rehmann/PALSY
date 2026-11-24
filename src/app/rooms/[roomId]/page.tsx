@@ -7,7 +7,7 @@ import type { Profile, Room, RoomMember, Message, MessageReceipt, Game } from '@
 import { Avatar } from '@/components/layout/AppLayout';
 import {
   ArrowLeft, Send, Users, Gamepad2, Settings, Copy, Check, CheckCheck, Hash, Lock, LockOpen,
-  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Palette, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3, Image as ImageIcon, Plus
+  Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Palette, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3, Image as ImageIcon, Plus, Sparkles
 } from 'lucide-react';
 import Link from 'next/link';
 import { GAME_META, initialStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel, SimonSays } from '@/components/GameComponents';
@@ -27,6 +27,8 @@ import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/e
 import { CHAT_THEMES, getChatTheme, chatListStyle } from '@/lib/chatThemes';
 import LockerPrompt from '@/components/LockerPrompt';
 import SoundToggle from '@/components/SoundToggle';
+import MessageEffect from '@/components/MessageEffect';
+import { MESSAGE_EFFECTS, isMessageEffectId, resolveMessageEffect, type MessageEffectId } from '@/lib/messageEffects';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
@@ -86,6 +88,17 @@ export default function RoomPage() {
   // composer stays roomy on a phone. Both flows are unchanged — the menu
   // just opens them.
   const [showPlusMenu, setShowPlusMenu] = useState(false);
+  // Message effects (migration 034): the effect picked in the composer
+  // for the next message, and the burst currently playing on screen.
+  // A burst plays once per new message — never for old messages on reload.
+  const [pickedEffect, setPickedEffect] = useState<MessageEffectId | null>(null);
+  const [showEffects, setShowEffects] = useState(false);
+  const [activeEffect, setActiveEffect] = useState<{ id: MessageEffectId; key: number } | null>(null);
+  const effectKeyRef = useRef(0);
+  function playEffect(id: MessageEffectId) {
+    effectKeyRef.current += 1;
+    setActiveEffect({ id, key: effectKeyRef.current });
+  }
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [actionMsg, setActionMsg] = useState<string|null>(null);
   const [editing, setEditing] = useState<Message|null>(null);
@@ -316,6 +329,11 @@ export default function RoomPage() {
               await stampReceipts(supabase, roomId, user.id, [full.id], true);
             }
           }
+          // Message effect: anyone else's message with an effect bursts
+          // on arrival. My own messages already played when I sent them.
+          if (full.sender_id !== user.id && isMessageEffectId(full.effect)) {
+            playEffect(full.effect);
+          }
         }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
@@ -518,6 +536,7 @@ export default function RoomPage() {
     if (!input.trim() || !profile) return;
     const supabase = createClient();
     setShowEmojis(false);
+    setShowEffects(false);
     setSendError('');
     if (editing) {
       const now = new Date().toISOString();
@@ -532,13 +551,16 @@ export default function RoomPage() {
       return;
     }
     const text = input.trim();
+    // Message effect: the picked effect wins, else a magic word in the
+    // text ("happy birthday", "congrats", "love you"…) picks one.
+    const effect = resolveMessageEffect(text, pickedEffect);
     // Optimistic: show the message instantly instead of waiting on realtime.
     const tempId = `temp-${Date.now()}`;
     const temp: Message = {
       id: tempId, room_id: roomId, sender_id: profile.id, receiver_id: null,
       content: text, media_url: null, delivered_at: null, read_at: null,
       edited_at: null, type: 'text', is_deleted: false, reply_to: null,
-      reply_to_id: replyTo?.id ?? null, is_pinned: false, pinned_at: null,
+      reply_to_id: replyTo?.id ?? null, effect: effect ?? null, is_pinned: false, pinned_at: null,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       sender: profile, reactions: [],
     };
@@ -546,7 +568,9 @@ export default function RoomPage() {
     setMessages(m=>[...m, temp]);
     setInput('');
     setReplyTo(null);
-    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: text, type: 'text', reply_to_id: replyTo?.id ?? null }).select().single();
+    if (effect) playEffect(effect);
+    setPickedEffect(null);
+    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: text, type: 'text', reply_to_id: replyTo?.id ?? null, effect: effect ?? null }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
       if (room) void notifyRoom(supabase, profile, room, members, 'text', text);
@@ -561,9 +585,10 @@ export default function RoomPage() {
     if (!msg || !profile || !msg.content) return;
     setSendError('');
     const supabase = createClient();
-    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: msg.content, type: 'text', reply_to_id: msg.reply_to_id ?? null }).select().single();
+    const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: msg.content, type: 'text', reply_to_id: msg.reply_to_id ?? null, effect: msg.effect ?? null }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
+      if (isMessageEffectId(msg.effect)) playEffect(msg.effect);
     } else {
       setSendError("Still couldn't send. Check your connection and try again.");
     }
@@ -1380,6 +1405,26 @@ export default function RoomPage() {
                   </div>
                 </>
               )}
+              {showEffects && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={()=>setShowEffects(false)} />
+                  <div className="absolute left-4 z-30 rounded-2xl p-2 w-[240px]" style={{bottom:'calc(100% + 8px)',background:'var(--color-surface)',border:`1px solid ${accentColor}33`,boxShadow:'0 4px 20px rgba(0,0,0,0.12)'}}>
+                    <p className="px-2 pt-1 pb-2 text-xs font-black" style={{color:'var(--color-text-muted)'}}>Send with an effect ✨</p>
+                    {MESSAGE_EFFECTS.map(e=>(
+                      <button key={e.id} type="button" onClick={()=>{setPickedEffect(e.id); setShowEffects(false); inputRef.current?.focus();}} className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)',background: pickedEffect===e.id ? 'var(--color-secondary)' : 'transparent'}}>
+                        <span className="text-lg">{e.emoji}</span> {e.name}
+                        <span className="ml-auto text-xs font-normal" style={{color:'var(--color-text-muted)'}}>{e.hint}</span>
+                      </button>
+                    ))}
+                    {pickedEffect && (
+                      <button type="button" onClick={()=>{setPickedEffect(null); setShowEffects(false);}} className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text-muted)'}}>
+                        <X size={14}/> No effect
+                      </button>
+                    )}
+                    <p className="px-2 pt-2 pb-1 text-[11px]" style={{color:'var(--color-text-muted)'}}>Magic words work too: “happy birthday”, “congrats”, “love you”, “good luck” ♡</p>
+                  </div>
+                </>
+              )}
               {editing && (
                 <div className="absolute left-0 right-0 flex items-center gap-2 px-4 py-2 text-xs z-20" style={{bottom:'100%',background:`${accentColor}22`,borderTop:`1px solid ${accentColor}33`,color:'var(--color-text-muted)'}}>
                   <Pencil size={12}/>
@@ -1397,15 +1442,18 @@ export default function RoomPage() {
               {/* File input: kept rendered (NOT display:none) — iOS Safari silently ignores
                   programmatic clicks on display:none inputs, so the picker never opens */}
               <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip" className="absolute h-px w-px opacity-0 overflow-hidden" onChange={handleRoomFileUpload}/>
-              <button type="button" disabled={uploading} onClick={() => { setShowEmojis(false); setShowPlusMenu(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showPlusMenu ? accentColor : `${accentColor}22`, color: showPlusMenu ? 'white' : accentColor}} title="Add attachment or poll">
+              <button type="button" disabled={uploading} onClick={() => { setShowEmojis(false); setShowEffects(false); setShowPlusMenu(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showPlusMenu ? accentColor : `${accentColor}22`, color: showPlusMenu ? 'white' : accentColor}} title="Add attachment or poll">
                 <Plus size={18}/>
               </button>
               <button type="button" onClick={isRecording ? stopRoomRecording : startRoomRecording} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: isRecording ? '#C62828' : `${accentColor}22`, color: isRecording ? 'white' : accentColor}} title={isRecording ? 'Stop recording' : 'Record voice message'}>
                 {isRecording ? <Square size={16}/> : <Mic size={18}/>}
               </button>
               {isRecording && <span className="text-xs font-bold flex-shrink-0" style={{color:'var(--color-danger)'}}>{Math.floor(recordTime/60)}:{String(recordTime%60).padStart(2,'0')}</span>}
-              <button type="button" onClick={() => { setShowPlusMenu(false); setShowEmojis(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showEmojis ? accentColor : `${accentColor}22`, color: showEmojis ? 'white' : accentColor}} title="Add emoji">
+              <button type="button" onClick={() => { setShowPlusMenu(false); setShowEffects(false); setShowEmojis(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showEmojis ? accentColor : `${accentColor}22`, color: showEmojis ? 'white' : accentColor}} title="Add emoji">
                 <Smile size={18}/>
+              </button>
+              <button type="button" onClick={() => { setShowPlusMenu(false); setShowEmojis(false); setShowEffects(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: pickedEffect ? accentColor : `${accentColor}22`, color: pickedEffect ? 'white' : accentColor}} title={pickedEffect ? `Effect: ${MESSAGE_EFFECTS.find(e=>e.id===pickedEffect)?.name} — tap to change` : 'Send with an effect'}>
+                {pickedEffect ? <span className="text-lg leading-none">{MESSAGE_EFFECTS.find(e=>e.id===pickedEffect)?.emoji}</span> : <Sparkles size={18}/>}
               </button>
               {showPoll && <PollForm accentColor={accentColor} onCreate={createPoll} onCancel={()=>setShowPoll(false)} />}
               <textarea ref={inputRef} value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,160)+'px';}}
@@ -1419,6 +1467,7 @@ export default function RoomPage() {
             </form>
           </>
         )}
+        {activeEffect && <MessageEffect key={activeEffect.key} effect={activeEffect.id} onDone={()=>setActiveEffect(null)} />}
 
         {tab==='members' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
