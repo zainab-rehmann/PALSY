@@ -1019,7 +1019,7 @@ export default function RoomPage() {
     const supabase = createClient();
     const ext = file.name.split('.').pop();
     const fileName = `${profile.id}/${Date.now()}.${ext}`;
-    const { data, error } = await supabase.storage.from('media').upload(fileName, file);
+    const { data, error } = await supabase.storage.from('media').upload(fileName, file).catch(() => ({ data: null, error: { message: 'network' } }));
     if (!error && data) {
       const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
       let type: 'text' | 'image' | 'video' | 'audio' | 'file' = 'file';
@@ -1394,7 +1394,9 @@ export default function RoomPage() {
                   <button type="button" onClick={()=>setReplyTo(null)}><X size={14}/></button>
                 </div>
               )}
-              <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip" className="hidden" onChange={handleRoomFileUpload}/>
+              {/* File input: kept rendered (NOT display:none) — iOS Safari silently ignores
+                  programmatic clicks on display:none inputs, so the picker never opens */}
+              <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip" className="absolute h-px w-px opacity-0 overflow-hidden" onChange={handleRoomFileUpload}/>
               <button type="button" disabled={uploading} onClick={() => { setShowEmojis(false); setShowPlusMenu(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: showPlusMenu ? accentColor : `${accentColor}22`, color: showPlusMenu ? 'white' : accentColor}} title="Add attachment or poll">
                 <Plus size={18}/>
               </button>
@@ -1460,7 +1462,8 @@ export default function RoomPage() {
                   <Camera size={14}/> Change
                 </button>
               </div>
-              <input ref={roomPicRef} type="file" accept="image/*" className="hidden" onChange={uploadRoomPic}/>
+              {/* Kept rendered (NOT display:none) — iOS Safari ignores clicks on display:none inputs */}
+              <input ref={roomPicRef} type="file" accept="image/*" className="absolute h-px w-px opacity-0 overflow-hidden" onChange={uploadRoomPic}/>
             </div>
             <div className="rounded-2xl p-4 space-y-3" style={{background:'rgba(var(--color-overlay-rgb),0.8)'}}>
               <h3 className="font-black theme-text">Room Theme</h3>

@@ -462,7 +462,7 @@ export default function DMPage() {
     const ext = file.name.split('.').pop();
     const fileName = `${profile.id}/${Date.now()}.${ext}`;
 
-    const { data, error } = await supabase.storage.from('media').upload(fileName, file);
+    const { data, error } = await supabase.storage.from('media').upload(fileName, file).catch(() => ({ data: null, error: { message: 'network' } }));
     if (!error && data) {
       const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
       let type: 'text' | 'image' | 'video' | 'audio' | 'file' = 'file';
@@ -1177,12 +1177,13 @@ async function addReaction(msgId: string, emoji: string) {
         <div ref={bottomRef}/>
       </div>
 
-      {/* Hidden file input */}
+      {/* File input: kept rendered (NOT display:none) — iOS Safari silently ignores
+          programmatic clicks on display:none inputs, so the picker never opens */}
       <input
         type="file"
         ref={fileInputRef}
         onChange={handleFileUpload}
-        className="hidden"
+        className="absolute h-px w-px opacity-0 overflow-hidden"
         accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
       />
       {friendTyping && (
