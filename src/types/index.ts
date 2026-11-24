@@ -45,6 +45,7 @@ export interface Room {
   wallpaper: string | null;
   accent_color: string | null;
   preset: string | null;
+  chat_theme: string | null;
   is_private: boolean;
   invite_code: string;
   has_entry_code: boolean;
