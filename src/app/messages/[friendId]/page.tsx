@@ -1644,7 +1644,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
   }
 
   if (!gameType) return (
-    <div className="flex-1 overflow-y-auto p-4">
+    <div className="flex-1 overflow-y-auto p-4 w-full max-w-[592px] mx-auto">
       <div className="flex items-center gap-2 mb-4">
         <button onClick={onClose} className="p-2 rounded-xl" style={{ background: 'rgba(var(--color-overlay-rgb),0.7)' }}>
           <ArrowLeft size={16} style={{ color: accentColor }} />
@@ -1680,7 +1680,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
   );
 
   return (
-    <div className="flex-1 overflow-y-auto p-4">
+    <div className="flex-1 overflow-y-auto p-4 w-full max-w-[592px] mx-auto">
       <div className="flex items-center gap-2 mb-4">
         <button onClick={closeGame} className="p-2 rounded-xl" style={{ background: 'rgba(var(--color-overlay-rgb),0.7)' }}>
           <ArrowLeft size={16} style={{ color: accentColor }} />
