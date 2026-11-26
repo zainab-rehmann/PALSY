@@ -169,6 +169,10 @@ export default function RoomPage() {
   const quotedFetchedRef = useRef<Set<string>>(new Set());
   const [pinnedList, setPinnedList] = useState<Message[]>([]);
   const [pinIndex, setPinIndex] = useState(0);
+  // Spotlight (migration 035): shared per-chat highlights — a gradient
+  // frame on the bubble + a Highlights strip at the top of the chat.
+  const [highlightedList, setHighlightedList] = useState<Message[]>([]);
+  const [highlightIndex, setHighlightIndex] = useState(0);
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [showStarred, setShowStarred] = useState(false);
   const [starredMessages, setStarredMessages] = useState<Message[]>([]);
@@ -341,7 +345,7 @@ export default function RoomPage() {
         if (upd.is_deleted) {
           setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, is_deleted: true, content: null } : x));
         } else {
-          setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, content: upd.content, edited_at: upd.edited_at, is_pinned: upd.is_pinned, pinned_at: upd.pinned_at, reply_to_id: upd.reply_to_id } : x));
+          setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, content: upd.content, edited_at: upd.edited_at, is_pinned: upd.is_pinned, pinned_at: upd.pinned_at, is_highlighted: upd.is_highlighted, highlighted_at: upd.highlighted_at, reply_to_id: upd.reply_to_id } : x));
         }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
@@ -500,6 +504,11 @@ export default function RoomPage() {
     supabase.from('messages').select('*,sender:profiles!sender_id(*)')
       .eq('room_id', roomId).eq('is_pinned', true).order('pinned_at', { ascending: false })
       .then(({ data }) => { setPinnedList((data||[]) as Message[]); setPinIndex(0); });
+    // Spotlight strip: the room's highlighted messages, newest first.
+    // Deleted messages never show here (they render as a placeholder).
+    supabase.from('messages').select('*,sender:profiles!sender_id(*)')
+      .eq('room_id', roomId).eq('is_highlighted', true).eq('is_deleted', false).order('highlighted_at', { ascending: false })
+      .then(({ data }) => { setHighlightedList((data||[]) as Message[]); setHighlightIndex(0); });
   }, [messages, profile, roomId]);
 
   // My own stars (private — only ever my own rows are readable).
@@ -560,7 +569,7 @@ export default function RoomPage() {
       id: tempId, room_id: roomId, sender_id: profile.id, receiver_id: null,
       content: text, media_url: null, delivered_at: null, read_at: null,
       edited_at: null, type: 'text', is_deleted: false, reply_to: null,
-      reply_to_id: replyTo?.id ?? null, effect: effect ?? null, is_pinned: false, pinned_at: null,
+      reply_to_id: replyTo?.id ?? null, effect: effect ?? null, is_pinned: false, pinned_at: null, is_highlighted: false, highlighted_at: null,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       sender: profile, reactions: [],
     };
@@ -760,6 +769,19 @@ export default function RoomPage() {
     const stamped = { ...msg, is_pinned: pinning, pinned_at: pinning ? new Date().toISOString() : null };
     setMessages(m=>m.map(x=>x.id===msg.id ? stamped : x));
     setPinnedList(prev => pinning ? [stamped, ...prev.filter(x=>x.id!==msg.id)] : prev.filter(x=>x.id!==msg.id));
+  }
+
+  // Spotlight (migration 035): highlight / un-highlight a message for
+  // everyone in this room — any member can do it, unlike pinning.
+  async function toggleHighlight(msg: Message) {
+    setActionMsg(null);
+    const supabase = createClient();
+    const highlighting = !msg.is_highlighted;
+    const { error } = await supabase.rpc('set_message_highlighted', { p_message_id: msg.id, p_highlight: highlighting });
+    if (error) { setSendError("Couldn't change that highlight. Please try again."); return; }
+    const stamped = { ...msg, is_highlighted: highlighting, highlighted_at: highlighting ? new Date().toISOString() : null };
+    setMessages(m=>m.map(x=>x.id===msg.id ? stamped : x));
+    setHighlightedList(prev => highlighting ? [stamped, ...prev.filter(x=>x.id!==msg.id)] : prev.filter(x=>x.id!==msg.id));
   }
 
   async function toggleStar(msg: Message) {
@@ -1241,6 +1263,13 @@ export default function RoomPage() {
                 {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:accentColor}}>{pinnedList.length} pinned · tap to cycle</span>}
               </button>
             )}
+            {highlightedList.length > 0 && (
+              <button onClick={()=>{ const next = (highlightIndex + 1) % highlightedList.length; setHighlightIndex(next); jumpToMessage(highlightedList[next].id); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:`linear-gradient(90deg, ${accentColor}26, #FF8FB326)`,borderBottom:`1px solid ${accentColor}33`}}>
+                <Sparkles size={14} style={{color:accentColor}} className="flex-shrink-0"/>
+                <span className="text-xs font-bold truncate" style={{color:'var(--color-text)'}}>Spotlight: {senderName(highlightedList[highlightIndex % highlightedList.length], highlightedList[highlightIndex % highlightedList.length].sender_id === profile?.id ? 'You' : 'Member')}: <span className="font-normal" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(highlightedList[highlightIndex % highlightedList.length])}</span></span>
+                {highlightedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:accentColor}}>{highlightedList.length} highlights · tap to cycle</span>}
+              </button>
+            )}
             {/* Messages — a shared chat theme wins over my own wallpaper; with no theme, my wallpaper shows as before */}
             <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={chatListStyle(room.chat_theme, profile?.wallpaper, profile?.theme==='autumn')}>
               {hasMore && messages.length > 0 && (
@@ -1288,6 +1317,8 @@ export default function RoomPage() {
                     {!mine && <Avatar profile={sender||{}} size={28}/>}
                     <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-0.5`}>
                       {!mine && <span className="text-xs font-bold px-1" style={{color:accentColor}}>{sender?.display_name||sender?.username}</span>}
+                      {/* Spotlight frame: a 2px gradient border around a highlighted bubble (migration 035). */}
+                      <div style={msg.is_highlighted ? { background: `linear-gradient(135deg, ${accentColor}, #FF8FB3, ${accentColor})`, padding: 2, borderRadius: 22 } : undefined}>
                       <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
                         style={{background:mine?(chatThemeActive?chatTheme.bubbleMine:accentColor+22):'rgba(var(--color-overlay-rgb),0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:mine&&chatThemeActive?chatTheme.bubbleMineText:'var(--color-text)'}}
                         onContextMenu={e=>{if(!selectMode){e.preventDefault();setMenuBelow(e.clientY < 240);setActionMsg(msg.id);}}}
@@ -1347,6 +1378,7 @@ export default function RoomPage() {
                               {(myRole==='owner'||myRole==='moderator') && (
                                 <button onClick={()=>togglePin(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:msg.is_pinned?accentColor:`${accentColor}22`,color:msg.is_pinned?'#fff':'var(--color-text)'}}><Pin size={12}/> {msg.is_pinned?'Unpin':'Pin'}</button>
                               )}
+                              <button onClick={()=>toggleHighlight(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:msg.is_highlighted?accentColor:`${accentColor}22`,color:msg.is_highlighted?'#fff':'var(--color-text)'}}><Sparkles size={12}/> {msg.is_highlighted?'Unhighlight':'Highlight'}</button>
                               <button onClick={()=>toggleStar(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:`${accentColor}22`,color:'var(--color-text)'}}><Star size={12}/> {starredIds.has(msg.id)?'Unstar':'Star'}</button>
                               <button onClick={()=>setActionMsg(null)} className="text-xs p-1"><X size={12}/></button>
                             </div>
@@ -1362,6 +1394,7 @@ export default function RoomPage() {
                           </>
                         )}
                       </div>
+                      </div>
                       {/* Reactions display — same as DMs: chips with counts, tap yours to remove it. */}
                       {msg.reactions && msg.reactions.length>0 && (
                         <div className="flex gap-1 flex-wrap">
@@ -1372,7 +1405,7 @@ export default function RoomPage() {
                           ))}
                         </div>
                       )}
-                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:accentColor}}/>}{starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{ticks === 'seen' ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-text)'}}><CheckCheck size={15}/> Seen</span> : ticks === 'delivered' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span> : ticks === 'sent' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span> : null}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'var(--color-danger)'}}>Not sent · Tap to retry</button>}</span>
+                      <span className="text-xs px-1" style={{color:'var(--color-text-muted)'}}>{msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:accentColor}}/>}{msg.is_highlighted && <Sparkles size={11} className="inline mr-1" style={{color:accentColor}}/>}{starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}{new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}{ticks === 'seen' ? <span className="ml-1.5 inline-flex items-center gap-0.5 font-semibold" style={{color:'var(--color-text)'}}><CheckCheck size={15}/> Seen</span> : ticks === 'delivered' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><CheckCheck size={15}/></span> : ticks === 'sent' ? <span className="ml-1.5 inline-flex items-center" style={{color:'var(--color-text-muted)'}}><Check size={15}/></span> : null}{msg.edited_at?' · edited':''}{msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'var(--color-danger)'}}>Not sent · Tap to retry</button>}</span>
                     </div>
                   </div>
                   </Fragment>
