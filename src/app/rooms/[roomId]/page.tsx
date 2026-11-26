@@ -1897,7 +1897,7 @@ function GamesTab({ roomId, profile, accentColor, members }: { roomId: string; p
   }
 
   if (!gameType) return (
-    <div className="flex-1 overflow-y-auto p-4">
+    <div className="flex-1 overflow-y-auto p-4 w-full max-w-[592px] mx-auto">
       {liveGame && (
         <div className="mb-4 p-4 rounded-2xl flex items-center gap-3" style={{background:`${accentColor}22`,border:`2px solid ${accentColor}44`}}>
           <span className="text-3xl">{GAME_META[liveGame.type]?.emoji || '🎮'}</span>
@@ -1927,7 +1927,7 @@ function GamesTab({ roomId, profile, accentColor, members }: { roomId: string; p
   );
 
   return (
-    <div className="flex-1 overflow-y-auto p-4">
+    <div className="flex-1 overflow-y-auto p-4 w-full max-w-[592px] mx-auto">
       <div className="flex items-center gap-2 mb-4">
         <button onClick={closeGame} className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>
           <ArrowLeft size={16} style={{color:accentColor}}/>
