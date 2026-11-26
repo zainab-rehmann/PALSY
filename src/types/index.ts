@@ -90,6 +90,10 @@ export interface Message {
   effect?: string | null;
   is_pinned: boolean;
   pinned_at: string | null;
+  // Spotlight (migration 035): shared per chat — highlighted messages
+  // get a gradient frame + join the Highlights strip at the top.
+  is_highlighted: boolean;
+  highlighted_at: string | null;
   created_at: string;
   updated_at: string;
   sender?: Profile;
