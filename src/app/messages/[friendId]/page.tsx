@@ -210,6 +210,10 @@ export default function DMPage() {
   const quotedFetchedRef = useRef<Set<string>>(new Set());
   const [pinnedList, setPinnedList] = useState<Message[]>([]);
   const [pinIndex, setPinIndex] = useState(0);
+  // Spotlight (migration 035): shared per-chat highlights — a gradient
+  // frame on the bubble + a Highlights strip at the top of the chat.
+  const [highlightedList, setHighlightedList] = useState<Message[]>([]);
+  const [highlightIndex, setHighlightIndex] = useState(0);
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [showStarred, setShowStarred] = useState(false);
   const [starredMessages, setStarredMessages] = useState<Message[]>([]);
@@ -303,7 +307,7 @@ export default function DMPage() {
           if (upd.is_deleted) {
             setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, is_deleted: true, content: null } : x));
           } else {
-            setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, delivered_at: upd.delivered_at, read_at: upd.read_at, content: upd.content, edited_at: upd.edited_at, is_pinned: upd.is_pinned, pinned_at: upd.pinned_at, reply_to_id: upd.reply_to_id } : x));
+            setMessages(m=>m.map(x=>x.id===upd.id ? { ...x, delivered_at: upd.delivered_at, read_at: upd.read_at, content: upd.content, edited_at: upd.edited_at, is_pinned: upd.is_pinned, pinned_at: upd.pinned_at, is_highlighted: upd.is_highlighted, highlighted_at: upd.highlighted_at, reply_to_id: upd.reply_to_id } : x));
           }
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
@@ -441,6 +445,12 @@ export default function DMPage() {
       .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
       .eq('is_pinned', true).order('pinned_at', { ascending: false })
       .then(({ data }) => { setPinnedList((data||[]) as Message[]); setPinIndex(0); });
+    // Spotlight strip: the chat's highlighted messages, newest first.
+    // Deleted messages never show here (they render as a placeholder).
+    supabase.from('messages').select('*,sender:profiles!sender_id(*)')
+      .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
+      .eq('is_highlighted', true).eq('is_deleted', false).order('highlighted_at', { ascending: false })
+      .then(({ data }) => { setHighlightedList((data||[]) as Message[]); setHighlightIndex(0); });
   }, [messages, profile, friendId]);
 
   // My own stars (private — only ever my own rows are readable).
@@ -599,7 +609,7 @@ export default function DMPage() {
       id: tempId, room_id: null, sender_id: profile.id, receiver_id: friendId,
       content: text, media_url: null, delivered_at: null, read_at: null,
       edited_at: null, type: 'text', is_deleted: false, reply_to: null,
-      reply_to_id: replyTo?.id ?? null, effect: effect ?? null, is_pinned: false, pinned_at: null,
+      reply_to_id: replyTo?.id ?? null, effect: effect ?? null, is_pinned: false, pinned_at: null, is_highlighted: false, highlighted_at: null,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       sender: profile, reactions: [],
     };
@@ -865,6 +875,20 @@ async function addReaction(msgId: string, emoji: string) {
     setPinnedList(prev => pinning ? [stamped, ...prev.filter(x=>x.id!==msg.id)] : prev.filter(x=>x.id!==msg.id));
   }
 
+  // Spotlight (migration 035): highlight / un-highlight a message for
+  // everyone in this chat — the gradient frame + strip entry follow from
+  // the shared row, exactly like pinning.
+  async function toggleHighlight(msg: Message) {
+    setReactionMsg(null);
+    const supabase = createClient();
+    const highlighting = !msg.is_highlighted;
+    const { error } = await supabase.rpc('set_message_highlighted', { p_message_id: msg.id, p_highlight: highlighting });
+    if (error) { setSendError("Couldn't change that highlight. Please try again."); return; }
+    const stamped = { ...msg, is_highlighted: highlighting, highlighted_at: highlighting ? new Date().toISOString() : null };
+    setMessages(m=>m.map(x=>x.id===msg.id ? stamped : x));
+    setHighlightedList(prev => highlighting ? [stamped, ...prev.filter(x=>x.id!==msg.id)] : prev.filter(x=>x.id!==msg.id));
+  }
+
   async function toggleStar(msg: Message) {
     setReactionMsg(null);
     if (!profile) return;
@@ -952,6 +976,7 @@ async function addReaction(msgId: string, emoji: string) {
   }
 
   const pinnedCurrent = pinnedList.length ? pinnedList[pinIndex % pinnedList.length] : null;
+  const highlightedCurrent = highlightedList.length ? highlightedList[highlightIndex % highlightedList.length] : null;
 
 
   if (loading) return <div className="min-h-screen flex items-center justify-center theme-bg"><div className="flex gap-2">{[0,1,2].map(i=><div key={i} style={{width:10,height:10,borderRadius:'50%',background:'var(--color-accent)',animation:'float 1s ease-in-out infinite',animationDelay:`${i*0.2}s`}}/>)}</div><style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style></div>;
@@ -1035,6 +1060,13 @@ async function addReaction(msgId: string, emoji: string) {
           {pinnedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:'var(--color-accent-text)'}}>{pinnedList.length} pinned · tap to cycle</span>}
         </button>
       )}
+      {highlightedCurrent && (
+        <button onClick={()=>{ const next = (highlightIndex + 1) % highlightedList.length; setHighlightIndex(next); jumpToMessage(highlightedList[next].id); }} className="flex items-center gap-2 px-4 py-2 text-left flex-shrink-0" style={{background:`linear-gradient(90deg, ${dmAccent}26, #FF8FB326)`,borderBottom:'1px solid var(--color-border)'}}>
+          <Sparkles size={14} style={{color:dmAccent}} className="flex-shrink-0"/>
+          <span className="text-xs font-bold truncate" style={{color:'var(--color-text)'}}>Spotlight: {senderName(highlightedCurrent, highlightedCurrent.sender_id === profile?.id ? 'You' : 'Friend')}: <span className="font-normal" style={{color:'var(--color-text-muted)'}}>{quoteSnippet(highlightedCurrent)}</span></span>
+          {highlightedList.length > 1 && <span className="text-[11px] font-bold flex-shrink-0" style={{color:'var(--color-accent-text)'}}>{highlightedList.length} highlights · tap to cycle</span>}
+        </button>
+      )}
 
       {dmLiveGame && !showGames && (
         <button onClick={() => setShowGames(true)} className="mx-4 mt-3 p-3 rounded-2xl flex items-center gap-3 text-left flex-shrink-0" style={{ background: `${dmAccent}22`, border: `2px solid ${dmAccent}44` }}>
@@ -1090,6 +1122,8 @@ async function addReaction(msgId: string, emoji: string) {
               )}
               {!mine && <Avatar profile={(msg.sender as Profile)||{}} size={28}/>}
               <div className={`max-w-[75%] ${mine?'items-end':'items-start'} flex flex-col gap-1`}>
+                {/* Spotlight frame: a 2px gradient border around a highlighted bubble (migration 035). */}
+                <div style={msg.is_highlighted ? { background: `linear-gradient(135deg, ${dmAccent}, #FF8FB3, ${dmAccent})`, padding: 2, borderRadius: 22 } : undefined}>
                 <div
                   className="px-4 py-2.5 rounded-2xl text-sm relative group cursor-pointer"
                   style={{
@@ -1157,6 +1191,7 @@ async function addReaction(msgId: string, emoji: string) {
                       <div className="flex gap-1 pt-1" style={{borderTop:'1px solid var(--color-border)'}}>
                         <button onClick={()=>startReply(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}><Reply size={12}/> Reply</button>
                         <button onClick={()=>togglePin(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:msg.is_pinned?'var(--color-accent)':'var(--color-secondary)',color:msg.is_pinned?'#fff':'var(--color-text)'}}><Pin size={12}/> {msg.is_pinned?'Unpin':'Pin'}</button>
+                        <button onClick={()=>toggleHighlight(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:msg.is_highlighted?'var(--color-accent)':'var(--color-secondary)',color:msg.is_highlighted?'#fff':'var(--color-text)'}}><Sparkles size={12}/> {msg.is_highlighted?'Unhighlight':'Highlight'}</button>
                         <button onClick={()=>toggleStar(msg)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold" style={{background:'var(--color-secondary)',color:'var(--color-text)'}}><Star size={12}/> {starredIds.has(msg.id)?'Unstar':'Star'}</button>
                       </div>
                       {mine && (
@@ -1171,6 +1206,7 @@ async function addReaction(msgId: string, emoji: string) {
                     </>
                   )}
                 </div>
+                </div>
                 {/* Reactions display */}
                 {msg.reactions && msg.reactions.length>0 && (
                   <div className="flex gap-1 flex-wrap">
@@ -1183,6 +1219,7 @@ async function addReaction(msgId: string, emoji: string) {
                 )}
                 <span className="text-xs" style={{color:'var(--color-text-muted)'}}>
                   {msg.is_pinned && <Pin size={11} className="inline mr-1" style={{color:'var(--color-accent)'}}/>}
+                  {msg.is_highlighted && <Sparkles size={11} className="inline mr-1" style={{color:dmAccent}}/>}
                   {starredIds.has(msg.id) && <Star size={11} className="inline mr-1" style={{color:'#F5B301'}}/>}
                   {new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
                   {msg.failed && <button onClick={()=>retrySend(msg.id)} className="ml-1.5 font-bold" style={{color:'var(--color-danger)'}}>Not sent · Tap to retry</button>}
