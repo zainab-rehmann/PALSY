@@ -86,7 +86,7 @@ export interface Message {
   reply_to_id: string | null;
   // Message effect (migration 034): 'confetti' | 'hearts' | 'fire' |
   // 'stars', or null for no effect. Stored on the row so both sides
-  // see the same burst; visual only, never changes the content.
+  // see the same animated bubble; visual only, never changes the content.
   effect?: string | null;
   is_pinned: boolean;
   pinned_at: string | null;

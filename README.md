@@ -17,7 +17,7 @@
 - 🔐 Optional chat locker — lock any DM or room behind a code, with private notifications
 - 🎂 Birthday magic — set your birthday in Settings and your friends see a cake badge + confetti banner on your day (Dashboard, Friends and DMs)
 - 😊 Full emoji picker (1,923 emojis) + 16 quick reactions in DMs and rooms (reactions arrive live)
-- ✨ Message effects + magic words — send any message with a Confetti, Hearts, Fire or Stars burst (✨ button in the composer), or just type “happy birthday”, “congrats”, “love you” or “good luck” and the matching effect plays automatically for everyone in the chat
+- ✨ Message effects + magic words — send any message with a Confetti, Hearts, Fire or Stars animated bubble (✨ button in the composer — the bubble itself pops, beats, ignites or sparkles, Instagram-style), or just type “happy birthday”, “congrats”, “love you” or “good luck” and the matching bubble effect plays automatically for everyone in the chat
 - 🌟 Spotlight highlights — hold any message and tap Highlight: it gets a gradient frame and joins the Highlights strip at the top of the chat for everyone in the conversation; tap a highlight to jump to the message, un-highlight to remove it
 - 📊 Polls in DMs and rooms — ask a question, everyone votes, results update live
 - ↩️ Reply, pin and star messages; export / clear chat; select + bulk delete

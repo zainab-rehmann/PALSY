@@ -2,7 +2,7 @@
 -- Wed 2026-11-25: Message effects + magic words). The sender picks an
 -- effect in the composer (or a magic word in the text picks one
 -- automatically) and the effect id is stored on the message row, so both
--- sides see the same burst — the sender on send, the receiver when the
+-- sides see the same animated bubble — the sender on send, the receiver when the
 -- message arrives live (see src/lib/messageEffects.ts).
 --
 -- Storage: one nullable text column on messages. The CHECK keeps it to

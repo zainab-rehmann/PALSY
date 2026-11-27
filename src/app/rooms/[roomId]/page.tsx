@@ -27,8 +27,8 @@ import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/e
 import { CHAT_THEMES, getChatTheme, chatListStyle } from '@/lib/chatThemes';
 import LockerPrompt from '@/components/LockerPrompt';
 import SoundToggle from '@/components/SoundToggle';
-import MessageEffect from '@/components/MessageEffect';
-import { MESSAGE_EFFECTS, isMessageEffectId, resolveMessageEffect, type MessageEffectId } from '@/lib/messageEffects';
+import MessageEffectStyles from '@/components/MessageEffect';
+import { MESSAGE_EFFECTS, bubbleEffectStyle, effectPreviewStyle, isMessageEffectId, messageEffectDef, resolveMessageEffect, type MessageEffectId } from '@/lib/messageEffects';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
@@ -88,17 +88,32 @@ export default function RoomPage() {
   // composer stays roomy on a phone. Both flows are unchanged — the menu
   // just opens them.
   const [showPlusMenu, setShowPlusMenu] = useState(false);
-  // Message effects (migration 034): the effect picked in the composer
-  // for the next message, and the burst currently playing on screen.
-  // A burst plays once per new message — never for old messages on reload.
+  // Message effects (migration 034, redone as animated bubbles
+  // 2026-11-27): the effect picked in the composer for the next
+  // message, and the messages whose bubbles are animating right now
+  // (message id -> effect). An animation plays once per new message —
+  // never for old messages on reload.
   const [pickedEffect, setPickedEffect] = useState<MessageEffectId | null>(null);
   const [showEffects, setShowEffects] = useState(false);
-  const [activeEffect, setActiveEffect] = useState<{ id: MessageEffectId; key: number } | null>(null);
-  const effectKeyRef = useRef(0);
-  function playEffect(id: MessageEffectId) {
-    effectKeyRef.current += 1;
-    setActiveEffect({ id, key: effectKeyRef.current });
+  const [animatingEffects, setAnimatingEffects] = useState<Record<string, MessageEffectId>>({});
+  const effectTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Animate one message's bubble: it plays its effect once, then settles
+  // back to its normal look when the timer clears it.
+  function animateMessage(id: string, effect: MessageEffectId) {
+    if (effectTimersRef.current[id]) clearTimeout(effectTimersRef.current[id]);
+    setAnimatingEffects(prev => ({ ...prev, [id]: effect }));
+    effectTimersRef.current[id] = setTimeout(() => {
+      setAnimatingEffects(prev => { const n = { ...prev }; delete n[id]; return n; });
+      delete effectTimersRef.current[id];
+    }, messageEffectDef(effect).durationMs);
   }
+  function clearMessageAnimation(id: string) {
+    if (effectTimersRef.current[id]) clearTimeout(effectTimersRef.current[id]);
+    delete effectTimersRef.current[id];
+    setAnimatingEffects(prev => { if (!(id in prev)) return prev; const n = { ...prev }; delete n[id]; return n; });
+  }
+  // Clear pending effect timers when the chat unmounts.
+  useEffect(() => () => { Object.values(effectTimersRef.current).forEach(clearTimeout); }, []);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [actionMsg, setActionMsg] = useState<string|null>(null);
   const [editing, setEditing] = useState<Message|null>(null);
@@ -333,10 +348,11 @@ export default function RoomPage() {
               await stampReceipts(supabase, roomId, user.id, [full.id], true);
             }
           }
-          // Message effect: anyone else's message with an effect bursts
-          // on arrival. My own messages already played when I sent them.
+          // Message effect: anyone else's message with an effect animates
+          // its bubble on arrival. My own messages already played when
+          // I sent them.
           if (full.sender_id !== user.id && isMessageEffectId(full.effect)) {
-            playEffect(full.effect);
+            animateMessage(full.id, full.effect);
           }
         }
       })
@@ -577,10 +593,13 @@ export default function RoomPage() {
     setMessages(m=>[...m, temp]);
     setInput('');
     setReplyTo(null);
-    if (effect) playEffect(effect);
+    if (effect) animateMessage(tempId, effect);
     setPickedEffect(null);
     const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: text, type: 'text', reply_to_id: replyTo?.id ?? null, effect: effect ?? null }).select().single();
     if (!error && data) {
+      // The real row replaces the optimistic one: move the bubble
+      // animation from the temp id onto the real message id.
+      if (effect) { clearMessageAnimation(tempId); animateMessage((data as Message).id, effect); }
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
       if (room) void notifyRoom(supabase, profile, room, members, 'text', text);
     } else {
@@ -597,7 +616,7 @@ export default function RoomPage() {
     const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: msg.content, type: 'text', reply_to_id: msg.reply_to_id ?? null, effect: msg.effect ?? null }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
-      if (isMessageEffectId(msg.effect)) playEffect(msg.effect);
+      if (isMessageEffectId(msg.effect)) animateMessage((data as Message).id, msg.effect);
     } else {
       setSendError("Still couldn't send. Check your connection and try again.");
     }
@@ -1320,7 +1339,11 @@ export default function RoomPage() {
                       {/* Spotlight frame: a 2px gradient border around a highlighted bubble (migration 035). */}
                       <div style={msg.is_highlighted ? { background: `linear-gradient(135deg, ${accentColor}, #FF8FB3, ${accentColor})`, padding: 2, borderRadius: 22 } : undefined}>
                       <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
-                        style={{background:mine?(chatThemeActive?chatTheme.bubbleMine:accentColor+22):'rgba(var(--color-overlay-rgb),0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:mine&&chatThemeActive?chatTheme.bubbleMineText:'var(--color-text)'}}
+                        style={{background:mine?(chatThemeActive?chatTheme.bubbleMine:accentColor+22):'rgba(var(--color-overlay-rgb),0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:mine&&chatThemeActive?chatTheme.bubbleMineText:'var(--color-text)',
+                        // Message effect: while this message's bubble is
+                        // animating, the keyframes pop/flash it, then it
+                        // settles back to its normal background.
+                        ...(animatingEffects[msg.id] ? bubbleEffectStyle(animatingEffects[msg.id], mine?(chatThemeActive?chatTheme.bubbleMine:accentColor+22):'rgba(var(--color-overlay-rgb),0.9)') : {})}}
                         onContextMenu={e=>{if(!selectMode){e.preventDefault();setMenuBelow(e.clientY < 240);setActionMsg(msg.id);}}}
                         onTouchStart={(e)=>{if(!selectMode) startPress(msg.id, e.touches[0]?.clientY);}} onTouchEnd={endPress} onTouchMove={endPress}
                         onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}>
@@ -1445,7 +1468,7 @@ export default function RoomPage() {
                     <p className="px-2 pt-1 pb-2 text-xs font-black" style={{color:'var(--color-text-muted)'}}>Send with an effect ✨</p>
                     {MESSAGE_EFFECTS.map(e=>(
                       <button key={e.id} type="button" onClick={()=>{setPickedEffect(e.id); setShowEffects(false); inputRef.current?.focus();}} className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)',background: pickedEffect===e.id ? 'var(--color-secondary)' : 'transparent'}}>
-                        <span className="text-lg">{e.emoji}</span> {e.name}
+                        <span className="inline-block w-7 h-5 rounded-full flex-shrink-0" style={effectPreviewStyle(e.id)} /> {e.name}
                         <span className="ml-auto text-xs font-normal" style={{color:'var(--color-text-muted)'}}>{e.hint}</span>
                       </button>
                     ))}
@@ -1486,7 +1509,7 @@ export default function RoomPage() {
                 <Smile size={18}/>
               </button>
               <button type="button" onClick={() => { setShowPlusMenu(false); setShowEmojis(false); setShowEffects(v=>!v); }} className="p-3 rounded-full flex-shrink-0 transition-all hover:scale-105" style={{background: pickedEffect ? accentColor : `${accentColor}22`, color: pickedEffect ? 'white' : accentColor}} title={pickedEffect ? `Effect: ${MESSAGE_EFFECTS.find(e=>e.id===pickedEffect)?.name} — tap to change` : 'Send with an effect'}>
-                {pickedEffect ? <span className="text-lg leading-none">{MESSAGE_EFFECTS.find(e=>e.id===pickedEffect)?.emoji}</span> : <Sparkles size={18}/>}
+                {pickedEffect ? <span className="inline-block w-5 h-4 rounded-full" style={effectPreviewStyle(pickedEffect)} /> : <Sparkles size={18}/>}
               </button>
               {showPoll && <PollForm accentColor={accentColor} onCreate={createPoll} onCancel={()=>setShowPoll(false)} />}
               <textarea ref={inputRef} value={input} onChange={e=>{setInput(e.target.value); broadcastTyping(); e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,160)+'px';}}
@@ -1500,7 +1523,7 @@ export default function RoomPage() {
             </form>
           </>
         )}
-        {activeEffect && <MessageEffect key={activeEffect.key} effect={activeEffect.id} onDone={()=>setActiveEffect(null)} />}
+        <MessageEffectStyles />
 
         {tab==='members' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-2">

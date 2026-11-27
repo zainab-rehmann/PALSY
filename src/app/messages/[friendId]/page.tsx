@@ -23,8 +23,8 @@ import { PollCard } from '@/components/PollCard';
 import { PollForm } from '@/components/PollForm';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 import SoundToggle from '@/components/SoundToggle';
-import MessageEffect from '@/components/MessageEffect';
-import { MESSAGE_EFFECTS, isMessageEffectId, resolveMessageEffect, type MessageEffectId } from '@/lib/messageEffects';
+import MessageEffectStyles from '@/components/MessageEffect';
+import { MESSAGE_EFFECTS, bubbleEffectStyle, effectPreviewStyle, isMessageEffectId, messageEffectDef, resolveMessageEffect, type MessageEffectId } from '@/lib/messageEffects';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
 
@@ -42,17 +42,32 @@ export default function DMPage() {
   // composer stays roomy on a phone. Both flows are unchanged — the menu
   // just opens them.
   const [showPlusMenu, setShowPlusMenu] = useState(false);
-  // Message effects (migration 034): the effect picked in the composer
-  // for the next message, and the burst currently playing on screen.
-  // A burst plays once per new message — never for old messages on reload.
+  // Message effects (migration 034, redone as animated bubbles
+  // 2026-11-27): the effect picked in the composer for the next
+  // message, and the messages whose bubbles are animating right now
+  // (message id -> effect). An animation plays once per new message —
+  // never for old messages on reload.
   const [pickedEffect, setPickedEffect] = useState<MessageEffectId | null>(null);
   const [showEffects, setShowEffects] = useState(false);
-  const [activeEffect, setActiveEffect] = useState<{ id: MessageEffectId; key: number } | null>(null);
-  const effectKeyRef = useRef(0);
-  function playEffect(id: MessageEffectId) {
-    effectKeyRef.current += 1;
-    setActiveEffect({ id, key: effectKeyRef.current });
+  const [animatingEffects, setAnimatingEffects] = useState<Record<string, MessageEffectId>>({});
+  const effectTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Animate one message's bubble: it plays its effect once, then settles
+  // back to its normal look when the timer clears it.
+  function animateMessage(id: string, effect: MessageEffectId) {
+    if (effectTimersRef.current[id]) clearTimeout(effectTimersRef.current[id]);
+    setAnimatingEffects(prev => ({ ...prev, [id]: effect }));
+    effectTimersRef.current[id] = setTimeout(() => {
+      setAnimatingEffects(prev => { const n = { ...prev }; delete n[id]; return n; });
+      delete effectTimersRef.current[id];
+    }, messageEffectDef(effect).durationMs);
   }
+  function clearMessageAnimation(id: string) {
+    if (effectTimersRef.current[id]) clearTimeout(effectTimersRef.current[id]);
+    delete effectTimersRef.current[id];
+    setAnimatingEffects(prev => { if (!(id in prev)) return prev; const n = { ...prev }; delete n[id]; return n; });
+  }
+  // Clear pending effect timers when the chat unmounts.
+  useEffect(() => () => { Object.values(effectTimersRef.current).forEach(clearTimeout); }, []);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -293,10 +308,11 @@ export default function DMPage() {
               await supabase.from('messages').update({ read_at: now, delivered_at: now }).eq('id', full.id);
               full.read_at = now; full.delivered_at = now;
             }
-            // Message effect: a friend's message with an effect bursts
-            // on arrival. My own messages already played when I sent them.
+            // Message effect: a friend's message with an effect animates
+            // its bubble on arrival. My own messages already played when
+            // I sent them.
             if (full && full.sender_id===friendId && isMessageEffectId(full.effect)) {
-              playEffect(full.effect);
+              animateMessage(full.id, full.effect);
             }
             // Dedupe: my own message may already be here via optimistic send.
             if (full) setMessages(m=> m.some(x=>x.id===full.id) ? m : [...m, full]);
@@ -617,13 +633,16 @@ export default function DMPage() {
     setMessages(m=>[...m, temp]);
     setInput('');
     setReplyTo(null);
-    if (effect) playEffect(effect);
+    if (effect) animateMessage(tempId, effect);
     setPickedEffect(null);
     const { data, error } = await supabase.from('messages').insert({
       sender_id: profile.id, receiver_id: friendId,
       content: text, type: 'text', reply_to_id: replyTo?.id ?? null, effect: effect ?? null
     }).select().single();
     if (!error && data) {
+      // The real row replaces the optimistic one: move the bubble
+      // animation from the temp id onto the real message id.
+      if (effect) { clearMessageAnimation(tempId); animateMessage((data as Message).id, effect); }
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
       void notifyDM(supabase, profile, friendId, 'text', text);
     } else {
@@ -645,7 +664,7 @@ export default function DMPage() {
     }).select().single();
     if (!error && data) {
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
-      if (isMessageEffectId(msg.effect)) playEffect(msg.effect);
+      if (isMessageEffectId(msg.effect)) animateMessage((data as Message).id, msg.effect);
     } else {
       setSendError("Still couldn't send. Check your connection and try again.");
     }
@@ -1131,6 +1150,10 @@ async function addReaction(msgId: string, emoji: string) {
                     color: mine && chatThemeActive ? chatTheme.bubbleMineText : undefined,
                     border: mine?undefined:'1px solid var(--color-border)',
                     borderRadius: mine?'20px 20px 4px 20px':'20px 20px 20px 4px',
+                    // Message effect: while this message's bubble is
+                    // animating, the keyframes pop/flash it, then it
+                    // settles back to its normal background.
+                    ...(animatingEffects[msg.id] ? bubbleEffectStyle(animatingEffects[msg.id], mine ? (chatThemeActive ? chatTheme.bubbleMine : 'var(--color-bubble-mine)') : 'var(--color-bubble-other)') : {}),
                   }}
                   onContextMenu={e=>{if(selectMode) return; e.preventDefault();setMenuBelow(e.clientY < 240);setReactionMsg(msg.id);}}
                   onTouchStart={(e)=>{if(!selectMode) startPress(msg.id, e.touches[0]?.clientY);}} onTouchEnd={endPress} onTouchMove={endPress}
@@ -1296,7 +1319,7 @@ async function addReaction(msgId: string, emoji: string) {
                 <p className="px-2 pt-1 pb-2 text-xs font-black" style={{color:'var(--color-text-muted)'}}>Send with an effect ✨</p>
                 {MESSAGE_EFFECTS.map(e=>(
                   <button key={e.id} type="button" onClick={()=>{setPickedEffect(e.id); setShowEffects(false); inputRef.current?.focus();}} className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl text-sm font-bold text-left" style={{color:'var(--color-text)',background: pickedEffect===e.id ? 'var(--color-secondary)' : 'transparent'}}>
-                    <span className="text-lg">{e.emoji}</span> {e.name}
+                    <span className="inline-block w-7 h-5 rounded-full flex-shrink-0" style={effectPreviewStyle(e.id)} /> {e.name}
                     <span className="ml-auto text-xs font-normal" style={{color:'var(--color-text-muted)'}}>{e.hint}</span>
                   </button>
                 ))}
@@ -1362,7 +1385,7 @@ async function addReaction(msgId: string, emoji: string) {
             style={{background: pickedEffect ? 'var(--color-accent)' : 'var(--color-secondary)', color: pickedEffect ? '#fff' : 'var(--color-accent)'}}
             title={pickedEffect ? `Effect: ${MESSAGE_EFFECTS.find(e=>e.id===pickedEffect)?.name} — tap to change` : 'Send with an effect'}
           >
-            {pickedEffect ? <span className="text-lg leading-none">{MESSAGE_EFFECTS.find(e=>e.id===pickedEffect)?.emoji}</span> : <Sparkles size={18} />}
+            {pickedEffect ? <span className="inline-block w-5 h-4 rounded-full" style={effectPreviewStyle(pickedEffect)} /> : <Sparkles size={18} />}
           </button>
 
           {showPoll && <PollForm accentColor={dmAccent} onCreate={createPoll} onCancel={()=>setShowPoll(false)} />}
@@ -1387,7 +1410,7 @@ async function addReaction(msgId: string, emoji: string) {
       )}
       </>
       )}
-      {activeEffect && <MessageEffect key={activeEffect.key} effect={activeEffect.id} onDone={()=>setActiveEffect(null)} />}
+      <MessageEffectStyles />
       {confirmAction === 'clear' && (
         <ConfirmDialog
           title="Clear this chat?"
