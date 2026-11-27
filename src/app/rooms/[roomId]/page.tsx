@@ -27,8 +27,8 @@ import { normalizeEntryCode, isValidEntryCode, generateEntryCode } from '@/lib/e
 import { CHAT_THEMES, getChatTheme, chatListStyle } from '@/lib/chatThemes';
 import LockerPrompt from '@/components/LockerPrompt';
 import SoundToggle from '@/components/SoundToggle';
-import MessageEffectStyles from '@/components/MessageEffect';
-import { MESSAGE_EFFECTS, bubbleEffectStyle, effectPreviewStyle, isMessageEffectId, messageEffectDef, resolveMessageEffect, type MessageEffectId } from '@/lib/messageEffects';
+import MessageEffectStyles, { EffectParticles } from '@/components/MessageEffect';
+import { MESSAGE_EFFECTS, bubbleEffectStyle, effectPreviewStyle, effectTintStyle, isMessageEffectId, messageEffectDef, resolveMessageEffect, type MessageEffectId } from '@/lib/messageEffects';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
 
 const EMOJI_LIST = ['❤️','😊','😂','🥺','✨','💕','😭','🔥','👍','🎉','😍','🥰','😮','👏','🙏','💯'];
@@ -89,27 +89,48 @@ export default function RoomPage() {
   // just opens them.
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   // Message effects (migration 034, redone as animated bubbles
-  // 2026-11-27): the effect picked in the composer for the next
-  // message, and the messages whose bubbles are animating right now
-  // (message id -> effect). An animation plays once per new message —
-  // never for old messages on reload.
+  // 2026-11-27, re-redone 2026-11-27): the effect picked in the
+  // composer for the next message, and the messages whose bubbles are
+  // animating right now (message id -> { effect, delayMs }). An
+  // animation plays once per new message — never for old messages on
+  // reload. delayMs is a NEGATIVE animation-delay (ms): when the real
+  // saved row replaces the optimistic message, the play carries across
+  // mid-flight instead of restarting (the old code cleared + re-animated
+  // and the bubble visibly snapped back to the start).
   const [pickedEffect, setPickedEffect] = useState<MessageEffectId | null>(null);
   const [showEffects, setShowEffects] = useState(false);
-  const [animatingEffects, setAnimatingEffects] = useState<Record<string, MessageEffectId>>({});
+  type AnimatingEffect = { effect: MessageEffectId; delayMs: number };
+  const [animatingEffects, setAnimatingEffects] = useState<Record<string, AnimatingEffect>>({});
   const effectTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  // Animate one message's bubble: it plays its effect once, then settles
-  // back to its normal look when the timer clears it.
+  const effectStartedAtRef = useRef<Record<string, number>>({});
+  // Animate one message's bubble: it plays its effect once, then the
+  // bubble keeps the effect's tint. Never restarts a play in progress.
   function animateMessage(id: string, effect: MessageEffectId) {
-    if (effectTimersRef.current[id]) clearTimeout(effectTimersRef.current[id]);
-    setAnimatingEffects(prev => ({ ...prev, [id]: effect }));
-    effectTimersRef.current[id] = setTimeout(() => {
-      setAnimatingEffects(prev => { const n = { ...prev }; delete n[id]; return n; });
-      delete effectTimersRef.current[id];
-    }, messageEffectDef(effect).durationMs);
+    if (effectTimersRef.current[id]) return;
+    const dur = messageEffectDef(effect).durationMs;
+    effectStartedAtRef.current[id] = Date.now();
+    setAnimatingEffects(prev => ({ ...prev, [id]: { effect, delayMs: 0 } }));
+    effectTimersRef.current[id] = setTimeout(() => clearMessageAnimation(id), dur);
+  }
+  // Carry a running play from the optimistic message onto the real saved
+  // row: same effect, same start time, no restart.
+  function transferMessageAnimation(oldId: string, newId: string, effect: MessageEffectId) {
+    const startedAt = effectStartedAtRef.current[oldId];
+    if (effectTimersRef.current[oldId]) { clearTimeout(effectTimersRef.current[oldId]); delete effectTimersRef.current[oldId]; }
+    delete effectStartedAtRef.current[oldId];
+    setAnimatingEffects(prev => { if (!(oldId in prev)) return prev; const n = { ...prev }; delete n[oldId]; return n; });
+    if (!startedAt) { animateMessage(newId, effect); return; }
+    const dur = messageEffectDef(effect).durationMs;
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= dur) return; // the play already finished — nothing to carry
+    effectStartedAtRef.current[newId] = startedAt;
+    setAnimatingEffects(prev => ({ ...prev, [newId]: { effect, delayMs: -elapsed } }));
+    effectTimersRef.current[newId] = setTimeout(() => clearMessageAnimation(newId), dur - elapsed);
   }
   function clearMessageAnimation(id: string) {
     if (effectTimersRef.current[id]) clearTimeout(effectTimersRef.current[id]);
     delete effectTimersRef.current[id];
+    delete effectStartedAtRef.current[id];
     setAnimatingEffects(prev => { if (!(id in prev)) return prev; const n = { ...prev }; delete n[id]; return n; });
   }
   // Clear pending effect timers when the chat unmounts.
@@ -597,9 +618,9 @@ export default function RoomPage() {
     setPickedEffect(null);
     const { data, error } = await supabase.from('messages').insert({ room_id: roomId, sender_id: profile.id, content: text, type: 'text', reply_to_id: replyTo?.id ?? null, effect: effect ?? null }).select().single();
     if (!error && data) {
-      // The real row replaces the optimistic one: move the bubble
-      // animation from the temp id onto the real message id.
-      if (effect) { clearMessageAnimation(tempId); animateMessage((data as Message).id, effect); }
+      // The real row replaces the optimistic one: carry the bubble
+      // animation across mid-flight instead of restarting it.
+      if (effect) { transferMessageAnimation(tempId, (data as Message).id, effect); }
       setMessages(m=>m.map(x=>x.id===tempId ? { ...(data as Message), sender: profile, reactions: [] } : x));
       if (room) void notifyRoom(supabase, profile, room, members, 'text', text);
     } else {
@@ -1290,7 +1311,7 @@ export default function RoomPage() {
               </button>
             )}
             {/* Messages — a shared chat theme wins over my own wallpaper; with no theme, my wallpaper shows as before */}
-            <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={chatListStyle(room.chat_theme, profile?.wallpaper, profile?.theme==='autumn')}>
+            <div ref={listRef} onScroll={handleListScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ ...chatListStyle(room.chat_theme, profile?.wallpaper, profile?.theme==='autumn'), overflowX: 'clip' }}>
               {hasMore && messages.length > 0 && (
                 <div className="flex justify-center pb-1">
                   <button onClick={loadOlder} disabled={loadingOlder} className="text-xs font-bold px-4 py-2 rounded-full" style={{background:'rgba(var(--color-overlay-rgb),0.9)',color:accentColor,border:`1px solid ${accentColor}33`}}>{loadingOlder ? 'Loading…' : '↑ Load older messages'}</button>
@@ -1305,6 +1326,8 @@ export default function RoomPage() {
               )}
               {messages.map((msg, i)=>{
                 const mine = msg.sender_id===profile?.id;
+                // Message effect on this row, narrowed once (null when none).
+                const fxEffect = isMessageEffectId(msg.effect) ? msg.effect : null;
                 const ticks = mine && !msg.failed ? tickState(msg) : null;
                 const sender = msg.sender as Profile;
                 // WhatsApp-style day divider: Today / Yesterday / full date.
@@ -1339,14 +1362,22 @@ export default function RoomPage() {
                       {/* Spotlight frame: a 2px gradient border around a highlighted bubble (migration 035). */}
                       <div style={msg.is_highlighted ? { background: `linear-gradient(135deg, ${accentColor}, #FF8FB3, ${accentColor})`, padding: 2, borderRadius: 22 } : undefined}>
                       <div className="px-4 py-2.5 rounded-2xl text-sm relative cursor-pointer"
-                        style={{background:mine?(chatThemeActive?chatTheme.bubbleMine:accentColor+22):'rgba(var(--color-overlay-rgb),0.9)',border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',color:mine&&chatThemeActive?chatTheme.bubbleMineText:'var(--color-text)',
-                        // Message effect: while this message's bubble is
-                        // animating, the keyframes pop/flash it, then it
-                        // settles back to its normal background.
-                        ...(animatingEffects[msg.id] ? bubbleEffectStyle(animatingEffects[msg.id], mine?(chatThemeActive?chatTheme.bubbleMine:accentColor+22):'rgba(var(--color-overlay-rgb),0.9)') : {})}}
+                        style={{
+                        // Message effect: a message with an effect keeps its
+                        // tint after the pop settles (and after reload — the
+                        // effect id is stored on the row).
+                        ...(fxEffect ? effectTintStyle(fxEffect) : {
+                          background:mine?(chatThemeActive?chatTheme.bubbleMine:accentColor+22):'rgba(var(--color-overlay-rgb),0.9)',
+                          color:mine&&chatThemeActive?chatTheme.bubbleMineText:'var(--color-text)',
+                        }),
+                        border:`1px solid ${accentColor}33`,borderRadius:mine?'20px 20px 4px 20px':'20px 20px 20px 4px',
+                        // While this message's bubble is animating, the
+                        // keyframes pop/flash it and land on its tint.
+                        ...(animatingEffects[msg.id] ? bubbleEffectStyle(animatingEffects[msg.id].effect, animatingEffects[msg.id].delayMs) : {})}}
                         onContextMenu={e=>{if(!selectMode){e.preventDefault();setMenuBelow(e.clientY < 240);setActionMsg(msg.id);}}}
                         onTouchStart={(e)=>{if(!selectMode) startPress(msg.id, e.touches[0]?.clientY);}} onTouchEnd={endPress} onTouchMove={endPress}
-                        onClick={msg.failed ? ()=>retrySend(msg.id) : undefined}>
+                        onClick={msg.failed ? ()=>retrySend(msg.id) : fxEffect ? ()=>{ if (!selectMode && actionMsg!==msg.id) animateMessage(msg.id, fxEffect); } : undefined}
+                        title={fxEffect ? 'Tap to replay the effect' : undefined}>
                         {msg.reply_to_id && (() => {
                           const q = quotedOf(msg);
                           const gone = q === null || (q !== undefined && q !== null && q.is_deleted);
@@ -1389,6 +1420,9 @@ export default function RoomPage() {
                         {msg.type === 'poll' && (
                           <PollCard poll={msg.poll_data} votes={msg.poll_votes || []} myId={profile?.id} accentColor={accentColor} onVote={(i) => votePoll(msg.id, i)} />
                         )}
+                        {/* Message effect particles: small solid shapes bursting
+                            from the bubble while its effect plays. */}
+                        {animatingEffects[msg.id] && <EffectParticles effect={animatingEffects[msg.id].effect} delayMs={animatingEffects[msg.id].delayMs} />}
                         {actionMsg===msg.id && (
                           <>
                           <div className="fixed inset-0 z-[5]" onClick={()=>setActionMsg(null)}/>
@@ -1477,7 +1511,7 @@ export default function RoomPage() {
                         <X size={14}/> No effect
                       </button>
                     )}
-                    <p className="px-2 pt-2 pb-1 text-[11px]" style={{color:'var(--color-text-muted)'}}>Magic words work too: “happy birthday”, “congrats”, “love you”, “good luck” ♡</p>
+                    <p className="px-2 pt-2 pb-1 text-[11px]" style={{color:'var(--color-text-muted)'}}>Magic words work too: “happy birthday”, “congrats”, “love you”, “good luck” ♡ Tap any effect message to replay it.</p>
                   </div>
                 </>
               )}
