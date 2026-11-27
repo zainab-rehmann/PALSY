@@ -1,60 +1,55 @@
-// PALSY — message effect burst (2-week plan, Wed 2026-11-25).
+// PALSY — message effect keyframes (2-week plan, Wed 2026-11-25,
+// REDONE Fri 2026-11-27 as Instagram-style animated bubbles).
 //
-// One short celebration overlay: pieces rise from the bottom of the
-// screen and fade away, then the component removes itself (onDone).
-// Used by DMs + rooms for both picked effects and magic words.
-// pointer-events-none, so it never blocks taps; solid colours only,
-// no blur/glow (her standing rule). Keyframes are inline, the same
-// pattern the dashboard + friends pages already use.
+// The first version was a full-screen emoji burst overlay. Zainab
+// corrected it: the effect is the MESSAGE BUBBLE itself changing
+// appearance in animation. So this file now only holds the keyframes
+// (rendered once per chat page via <MessageEffectStyles/>) plus the
+// bubble animation. The pages apply the animation to a bubble with
+// bubbleEffectStyle() from src/lib/messageEffects.ts when a message
+// with an effect is new, and remove it after one play.
+//
+// The keyframes animate transform + background-color only, using three
+// CSS variables set on the bubble: --fx-bg (its normal background —
+// the animation lands back on it, so the bubble settles exactly where
+// it started), --fx-accent and --fx-accent2 (solid flash colours).
+// Solid colours only, no blur/glow/transparency (her standing rule).
 'use client';
-import { useEffect, useMemo } from 'react';
-import { messageEffectDef, type MessageEffectId } from '@/lib/messageEffects';
 
-export default function MessageEffect({
-  effect,
-  onDone,
-}: {
-  effect: MessageEffectId;
-  onDone: () => void;
-}) {
-  const def = messageEffectDef(effect);
-  const pieces = useMemo(
-    () =>
-      Array.from({ length: 26 }, (_, i) => ({
-        left: 4 + Math.random() * 92, // % across the screen
-        delay: Math.random() * 0.35, // seconds before this piece starts
-        duration: 1.4 + Math.random() * 0.9,
-        size: 16 + Math.random() * 14,
-        char: def.pieces[i % def.pieces.length],
-        color: def.colors[i % def.colors.length],
-      })),
-    [def],
-  );
-  useEffect(() => {
-    const t = setTimeout(onDone, 2400);
-    return () => clearTimeout(t);
-  }, [onDone]);
+export function MessageEffectStyles() {
   return (
-    <div
-      className="pointer-events-none fixed inset-0 z-50 overflow-hidden"
-      aria-hidden="true"
-    >
-      <style>{`@keyframes msg-effect-rise{0%{transform:translateY(0) rotate(0deg) scale(0.6);opacity:0}12%{opacity:1}100%{transform:translateY(-46vh) rotate(340deg) scale(1.05);opacity:0}}`}</style>
-      {pieces.map((p, i) => (
-        <span
-          key={i}
-          style={{
-            position: 'absolute',
-            left: `${p.left}%`,
-            bottom: '-8%',
-            fontSize: p.size,
-            color: p.color,
-            animation: `msg-effect-rise ${p.duration}s ease-out ${p.delay}s forwards`,
-          }}
-        >
-          {p.char}
-        </span>
-      ))}
-    </div>
+    <style>{`
+@keyframes msg-fx-confetti{
+  0%{transform:scale(.45) rotate(-5deg);background-color:var(--fx-accent)}
+  35%{transform:scale(1.14) rotate(2deg);background-color:var(--fx-accent2)}
+  60%{transform:scale(.96) rotate(0deg);background-color:var(--fx-bg)}
+  80%{transform:scale(1.03);background-color:var(--fx-bg)}
+  100%{transform:scale(1) rotate(0deg);background-color:var(--fx-bg)}
+}
+@keyframes msg-fx-hearts{
+  0%{transform:scale(1);background-color:var(--fx-bg)}
+  20%{transform:scale(1.16);background-color:var(--fx-accent)}
+  35%{transform:scale(.94);background-color:var(--fx-bg)}
+  55%{transform:scale(1.1);background-color:var(--fx-accent2)}
+  75%{transform:scale(.98);background-color:var(--fx-bg)}
+  100%{transform:scale(1);background-color:var(--fx-bg)}
+}
+@keyframes msg-fx-fire{
+  0%{transform:scale(.85) translateY(6px);background-color:var(--fx-accent2)}
+  30%{transform:scale(1.1) translateY(-2px);background-color:var(--fx-accent)}
+  55%{transform:scale(.98) translateX(2px);background-color:var(--fx-bg)}
+  70%{transform:scale(1.02) translateX(-2px);background-color:var(--fx-bg)}
+  100%{transform:scale(1) translateX(0) translateY(0);background-color:var(--fx-bg)}
+}
+@keyframes msg-fx-stars{
+  0%{transform:scale(.9);background-color:var(--fx-accent2)}
+  30%{transform:scale(1.06);background-color:var(--fx-accent)}
+  55%{transform:scale(.97);background-color:var(--fx-bg)}
+  80%{transform:scale(1.03);background-color:var(--fx-bg)}
+  100%{transform:scale(1);background-color:var(--fx-bg)}
+}
+`}</style>
   );
 }
+
+export default MessageEffectStyles;
