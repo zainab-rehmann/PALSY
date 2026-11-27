@@ -8,7 +8,8 @@ import { Avatar } from '@/components/layout/AppLayout';
 import { ArrowLeft, Send, Paperclip, Mic, Smile, X, Square, Play, Pause, Image as ImageIcon, FileText, Check, CheckCheck, Pencil, Trash2, MoreVertical, Download, ListChecks, Reply, Pin, Star, Lock, LockOpen, Gamepad2, RotateCcw, BarChart3, Palette, Plus, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 
-import EmojiPicker from '@/components/EmojiPicker';
+import NextDynamic from 'next/dynamic';
+const EmojiPicker = NextDynamic(() => import('@/components/EmojiPicker'), { ssr: false });
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
 import { isBirthdayToday } from '@/lib/birthday';
 import { CHAT_THEMES, getChatTheme, chatListStyle } from '@/lib/chatThemes';
@@ -17,8 +18,10 @@ import { notifyDM } from '@/lib/notify';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import DeleteMessageDialog from '@/components/DeleteMessageDialog';
 import LockerPrompt from '@/components/LockerPrompt';
-import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel, SimonSays } from '@/components/GameComponents';
-import MediaGallery, { type GalleryItem } from '@/components/MediaGallery';
+import { GAME_META, initialStateFor, restartStateFor, dealCrazyEights, seatCheckersPlayer } from '@/lib/gameLogic';
+import GamePanel from '@/components/GamePanel';
+import type { GalleryItem } from '@/components/MediaGallery';
+const MediaGallery = NextDynamic(() => import('@/components/MediaGallery'), { ssr: false });
 import { PollCard } from '@/components/PollCard';
 import { PollForm } from '@/components/PollForm';
 import { getLockedChats, lockChat, unlockChat, hasLockerCode, verifyLockerCode, isLockerUnlocked, setLockerUnlocked } from '@/lib/locker';
@@ -211,7 +214,10 @@ export default function DMPage() {
       if (!cancelled) setDmLiveGame(data && data[0] ? (data[0] as Game) : null);
     }
     void load();
-    const t = setInterval(load, 3000);
+    // 15s idle cadence: realtime is the primary path for a new game;
+    // this only covers a dropped subscription, and never fires while
+    // the tab is hidden.
+    const t = setInterval(() => { if (!document.hidden) void load(); }, 15000);
     return () => { cancelled = true; clearInterval(t); };
   }, [dmKey, gated]);
 
@@ -1559,6 +1565,9 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
   const [gameState, setGameState] = useState<any>(null);
   const [players, setPlayers] = useState<any[]>([]);
   const [liveGame, setLiveGame] = useState<Game | null>(null);
+  const liveGameRef = useRef<Game | null>(null);
+  const lastIdlePollRef = useRef(0);
+  useEffect(() => { liveGameRef.current = liveGame; }, [liveGame]);
   const openGameIdRef = useRef<string | null>(null);
   const autoJoinedRef = useRef<string | null>(null);
 
@@ -1611,8 +1620,17 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
         }
       })
       .subscribe();
+    // Idle-throttled: with no live game and none open, the banner only
+    // re-checks every 15s (realtime is the primary path), and nothing
+    // polls while the tab is hidden — an idle DM used to fire three
+    // game queries every 2–3s forever.
     const poll = setInterval(async () => {
-      if (cancelled) return;
+      if (cancelled || document.hidden) return;
+      if (!openGameIdRef.current && !liveGameRef.current) {
+        const now = Date.now();
+        if (now - lastIdlePollRef.current < 15000) return;
+        lastIdlePollRef.current = now;
+      }
       const { data } = await supabase.from('games').select('*').eq('dm_key', dmKey).neq('status', 'finished').order('created_at', { ascending: false }).limit(1);
       if (cancelled) return;
       if (data && data[0]) setLiveGame(data[0] as Game);
@@ -1754,18 +1772,7 @@ function DMGamesPanel({ dmKey, profile, friendName, accentColor, initialGameId, 
           <span className="block text-xs font-semibold mt-1" style={{ color: 'var(--color-text-muted)' }}>The game starts when they open it — no invite needed.</span>
         </div>
       )}
-      {gameType === 'tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'hangman' && game && <Hangman game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'draw-guess' && game && <DrawGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'categories' && game && <CategoriesDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
-      {gameType === 'simon-says' && game && <SimonSays game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any) => setGameState(s)} />}
+      <GamePanel gameType={gameType} game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={friendName} onUpdate={(s: any) => setGameState(s)} />
     </div>
   );
 }

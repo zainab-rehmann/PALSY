@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import Image from 'next/image';
 import type { Profile, Room, FriendRequest } from '@/types';
 import { PalsyLogo } from '@/components/branding/PalsyLogo';
 import NotificationBell from '@/components/NotificationBell';
@@ -13,7 +14,7 @@ import {
 
 function Avatar({ profile, size=36 }: { profile: Partial<Profile>; size?: number }) {
   if (profile.avatar_url) {
-    return <img src={profile.avatar_url} alt={profile.display_name||''} className="rounded-full object-cover" style={{width:size,height:size}}/>;
+    return <Image src={profile.avatar_url} alt={profile.display_name||''} width={size} height={size} className="rounded-full object-cover" style={{width:size,height:size}}/>;
   }
   const initials = (profile.display_name||profile.username||'?').slice(0,2).toUpperCase();
   const colors = ['#A9C9F5','#F2BBD2','#C5DEFF','#FCE3EE','#E8F4FF','#FDE8F0'];
