@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, Room, FriendRequest, Notification } from '@/types';
 import { DesktopNav, MobileNav, Avatar } from '@/components/layout/AppLayout';
+import Image from 'next/image';
 import { isBirthdayToday } from '@/lib/birthday';
 import NotificationBell from '@/components/NotificationBell';
 import Stories from '@/components/Stories';
@@ -262,7 +263,7 @@ function RoomCard({ room, dark }: { room: Room; dark?: boolean }) {
       <div className="p-4">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg" style={{background:'rgba(var(--color-overlay-rgb),0.6)'}}>
-            {room.avatar_url ? <img src={room.avatar_url} alt={room.name} className="w-10 h-10 rounded-xl object-cover"/> : room.name[0].toUpperCase()}
+            {room.avatar_url ? <Image src={room.avatar_url} alt={room.name} width={40} height={40} className="w-10 h-10 rounded-xl object-cover"/> : room.name[0].toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-black text-sm theme-text truncate">{room.name}</p>
