@@ -10,6 +10,7 @@
 // the caller loaded with a conversation-filtered query (room_id = this
 // room, or the DM pair) — it runs no query of its own and never sees
 // another conversation's media. Solid colours only, no blur/glow.
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { X, ChevronLeft, ChevronRight, Play } from 'lucide-react';
 
@@ -85,7 +86,7 @@ export default function MediaGallery({ items, title, accentColor, loading, onClo
                     </span>
                   </>
                 ) : (
-                  <img src={it.media_url} alt="shared media" loading="lazy" className="w-full h-full object-cover" />
+                  <Image src={it.media_url} alt="shared media" width={400} height={400} className="w-full h-full object-cover" />
                 )}
               </button>
             ))}
