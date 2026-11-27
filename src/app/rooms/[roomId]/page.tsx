@@ -10,12 +10,16 @@ import {
   Crown, Shield, LogOut, Trash2, X, Share2, Smile, Pencil, Camera, Bell, BellOff, Paperclip, Palette, Mic, Square, FileText, RotateCcw, MoreVertical, Download, ListChecks, KeyRound, Dices, Reply, Pin, Star, BarChart3, Image as ImageIcon, Plus, Sparkles
 } from 'lucide-react';
 import Link from 'next/link';
-import { GAME_META, initialStateFor, dealCrazyEights, seatCheckersPlayer, TicTacToe, RPS, NumberGuess, Hangman, DrawGuess, TriviaDuel, DotsBoxes, CrazyEights, WordleDuel, Checkers, CategoriesDuel, SimonSays } from '@/components/GameComponents';
-import MediaGallery, { type GalleryItem } from '@/components/MediaGallery';
+import NextDynamic from 'next/dynamic';
+import Image from 'next/image';
+import { GAME_META, initialStateFor, dealCrazyEights, seatCheckersPlayer } from '@/lib/gameLogic';
+import GamePanel from '@/components/GamePanel';
+import type { GalleryItem } from '@/components/MediaGallery';
+const MediaGallery = NextDynamic(() => import('@/components/MediaGallery'), { ssr: false });
 import { PollCard } from '@/components/PollCard';
 import { PollForm } from '@/components/PollForm';
 
-import EmojiPicker from '@/components/EmojiPicker';
+const EmojiPicker = NextDynamic(() => import('@/components/EmojiPicker'), { ssr: false });
 import { isFreshOnline, presenceLabel, sameDay, dayDividerLabel } from '@/lib/presence';
 import { isBirthdayToday } from '@/lib/birthday';
 import { CHAT_PAGE_SIZE, buildTranscript, downloadTextFile, senderName, quoteSnippet } from '@/lib/chatTools';
@@ -1242,7 +1246,7 @@ export default function RoomPage() {
       <header className="flex items-center gap-3 px-4 py-3 z-20 flex-shrink-0" style={{background:'rgba(var(--color-overlay-rgb),0.9)',backdropFilter:'blur(8px)',borderBottom:'1px solid rgba(var(--color-overlay-rgb),0.4)'}}>
         <Link href="/rooms" className="p-2 rounded-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}><ArrowLeft size={18} style={{color:accentColor}}/></Link>
                   {room.avatar_url
-? <img src={room.avatar_url} alt={room.name} className="w-9 h-9 rounded-xl object-cover"/>
+? <Image src={room.avatar_url} alt={room.name} width={36} height={36} className="w-9 h-9 rounded-xl object-cover"/>
 : <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{background:'rgba(var(--color-overlay-rgb),0.7)'}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
         <div className="flex-1 min-w-0">
           <p className="font-black text-sm theme-text truncate flex items-center gap-1.5">{room.name}{room.has_entry_code && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{background:`${accentColor}22`,color:accentColor}}><KeyRound size={10}/>Entry code</span>}</p>
@@ -1591,7 +1595,7 @@ export default function RoomPage() {
               <h3 className="font-black theme-text">Room Picture</h3>
               <div className="flex items-center gap-3">
                 {room.avatar_url
-                  ? <img src={room.avatar_url} alt={room.name} className="w-16 h-16 rounded-2xl object-cover"/>
+                  ? <Image src={room.avatar_url} alt={room.name} width={64} height={64} className="w-16 h-16 rounded-2xl object-cover"/>
                   : <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl" style={{background:`${accentColor}22`}}>{preset?.emoji||room.name[0].toUpperCase()}</div>}
                 <div className="flex-1">
                   <p className="text-sm font-bold theme-text">{room.name}</p>
@@ -1798,6 +1802,9 @@ function GamesTab({ roomId, profile, accentColor, members }: { roomId: string; p
   const [gameState, setGameState] = useState<any>(null);
   const [players, setPlayers] = useState<any[]>([]);
   const [liveGame, setLiveGame] = useState<Game|null>(null);
+  const liveGameRef = useRef<Game | null>(null);
+  const lastIdlePollRef = useRef(0);
+  useEffect(() => { liveGameRef.current = liveGame; }, [liveGame]);
   const openGameIdRef = useRef<string|null>(null);
 
 
@@ -1861,8 +1868,17 @@ function GamesTab({ roomId, profile, accentColor, members }: { roomId: string; p
     // and any open game still refresh within a couple of seconds, so a
     // waiting screen never looks stuck, results always appear, and a
     // guesser never stares at a blank canvas for long.
+    // Throttled while idle: with no live game and none open, the banner
+    // only re-checks every 15s (realtime is the primary path), and
+    // nothing polls while the tab is hidden — an idle room used to fire
+    // two game queries every 2s forever.
     const poll = setInterval(async () => {
-      if (cancelled) return;
+      if (cancelled || document.hidden) return;
+      if (!openGameIdRef.current && !liveGameRef.current) {
+        const now = Date.now();
+        if (now - lastIdlePollRef.current < 15000) return;
+        lastIdlePollRef.current = now;
+      }
       const { data } = await supabase.from('games').select('*').eq('room_id', roomId).neq('status','finished').order('created_at', { ascending: false }).limit(1);
       if (cancelled) return;
       if (data && data[0]) setLiveGame(data[0] as Game);
@@ -2004,18 +2020,7 @@ function GamesTab({ roomId, profile, accentColor, members }: { roomId: string; p
           <span className="block text-xs font-semibold mt-1" style={{color:'var(--color-text-muted)'}}>The game starts when both players are in.</span>
         </div>
       )}
-      {gameType==='tictactoe' && game && <TicTacToe game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='rps' && game && <RPS game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='number-guess' && game && <NumberGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='hangman' && game && <Hangman game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='draw-guess' && game && <DrawGuess game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='trivia' && game && <TriviaDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='dots-boxes' && game && <DotsBoxes game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='crazy-eights' && game && <CrazyEights game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='wordle' && game && <WordleDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='checkers' && game && <Checkers game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='categories' && game && <CategoriesDuel game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
-      {gameType==='simon-says' && game && <SimonSays game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} onUpdate={(s: any)=>setGameState(s)}/>}
+      <GamePanel gameType={gameType} game={game} state={gameState} profile={profile} accentColor={accentColor} canPlay={bothIn} players={players} opponentName={opponentName} onUpdate={(s: any) => setGameState(s)} />
     </div>
   );
 }
