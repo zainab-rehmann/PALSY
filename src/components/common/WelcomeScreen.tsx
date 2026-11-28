@@ -94,6 +94,11 @@ export default function WelcomeScreen({ onComplete }: { onComplete: () => void }
         </div>
       </div>
 
+      {/* Creator credit */}
+      <div className="absolute bottom-5 left-0 right-0 z-10 text-center" style={{animation:'fadeIn 0.5s ease-out 0.9s both',fontFamily:"'Nunito',sans-serif",fontWeight:600,fontSize:'0.8rem',color:'#6B7E9E',letterSpacing:'0.3px'}}>
+        Created by Zainab Rehman-ZR
+      </div>
+
       <style>{`
         @keyframes popIn{0%{transform:scale(0) rotate(-10deg);opacity:0}70%{transform:scale(1.1) rotate(2deg)}100%{transform:scale(1) rotate(0);opacity:1}}
         @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
