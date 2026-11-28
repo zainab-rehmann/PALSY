@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     images: ["/icon-512.png"],
   },
   robots: { index: true, follow: true },
-  authors: [{ name: "Zainab Rehman-ZR" }],
+  authors: [{ name: "Zainab Rehman", url: "https://github.com/zainab-rehmann" }],
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
@@ -44,7 +44,24 @@ const jsonLd = {
   name: "PALSY",
   alternateName: "palsy-app",
   url: "https://palsy-app.vercel.app",
-  creator: "Zainab Rehman-ZR",
+  author: {
+    "@type": "Person",
+    name: "Zainab Rehman",
+    url: "https://github.com/zainab-rehmann",
+    sameAs: [
+      "https://github.com/zainab-rehmann",
+      "https://www.linkedin.com/in/zainab-rehman-28947a343/",
+    ],
+  },
+  creator: {
+    "@type": "Person",
+    name: "Zainab Rehman",
+    url: "https://github.com/zainab-rehmann",
+    sameAs: [
+      "https://github.com/zainab-rehmann",
+      "https://www.linkedin.com/in/zainab-rehman-28947a343/",
+    ],
+  },
   applicationCategory: "SocialNetworkingApplication",
   operatingSystem: "Web",
   offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
